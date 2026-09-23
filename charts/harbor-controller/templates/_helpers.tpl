@@ -60,3 +60,26 @@ Create the name of the ServiceAccount to use
 {{- .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Construct a namespace-qualified registry host for the dockerconfigjson Secret.
+If the configured registryHost is a short service name (no dots and no port
+separator that looks like a hostname), qualify it with the release namespace
+so it resolves from any target namespace.
+Examples:
+  "harbor:80"           → "harbor.<namespace>.svc:80"
+  "harbor:443"          → "harbor.<namespace>.svc:443"
+  "harbor.svc:80"       → "harbor.svc:80"         (unchanged)
+  "registry.sealos.io"  → "registry.sealos.io"    (unchanged)
+*/}}
+{{- define "harbor-controller.registryHost" -}}
+{{- $host := .Values.harbor.registryHost | default "registry.sealos.io" -}}
+{{- $serviceName := splitList ":" $host | first -}}
+{{- $port := splitList ":" $host | last -}}
+{{- /* If the service name has no dots, it's a short name → qualify */ -}}
+{{- if not (contains "." $serviceName) -}}
+{{- printf "%s.%s.svc:%s" $serviceName .Release.Namespace $port -}}
+{{- else -}}
+{{- $host -}}
+{{- end -}}
+{{- end -}}

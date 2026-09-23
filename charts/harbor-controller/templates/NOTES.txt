@@ -1,3 +1,12 @@
+Prerequisites before the controller starts:
+
+  Create the Harbor admin password Secret in namespace {{ .Release.Namespace }}:
+
+    kubectl -n {{ .Release.Namespace }} create secret generic harbor-admin-password \
+      --from-literal=password=<your-harbor-admin-password>
+
+  The controller will stay in CreateContainerConfigError until this Secret exists.
+
 1. Get the controller pod status:
 
    kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "harbor-controller.name" . }}

@@ -44,8 +44,7 @@ harbor:
   registryHost: "registry.sealos.io"
 
 # Controller command-line arguments
-controllerArgs:
-  - --leader-elect
+controllerArgs: []
 
 # Metrics configuration
 metrics:

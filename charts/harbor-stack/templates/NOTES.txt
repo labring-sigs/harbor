@@ -7,25 +7,26 @@ Bundled Harbor (minimal):
   - Harbor Core, Registry, JobService, Database, Redis
   - Portal, Trivy, Notary, ChartMuseum, Exporter → disabled
 
-1. Create the shared admin password secret:
+The chart automatically creates the shared admin password Secret
+from .Values.harbor.adminPassword (default: "Harbor12345").
+Change it before installing or update it after deploy:
 
-   kubectl -n {{ .Release.Namespace }} create secret generic harbor-admin-password \
-     --from-literal=password=<your-harbor-admin-password>
+  helm upgrade --set harbor.adminPassword=<your-password>
 
-2. Wait for Harbor to become ready:
+1. Wait for Harbor to become ready:
 
    kubectl -n {{ .Release.Namespace }} get pods \
-     -l app.kubernetes.io/component=harbor
+     -l app.kubernetes.io/component=core
 
-3. The controller will connect to the bundled Harbor at:
+2. The controller will connect to the bundled Harbor at:
    http://harbor.{{ .Release.Namespace }}.svc:80
 
-4. Check the controller logs:
+3. Check the controller logs:
 
    kubectl -n {{ .Release.Namespace }} logs \
      deployment/{{ .Release.Name }}-harbor-controller
 
-5. Create a HarborProject:
+4. Create a HarborProject:
 
    cat <<EOF | kubectl apply -f -
    apiVersion: harbor.sealos.io/v1
@@ -47,7 +48,8 @@ Bundled Harbor (minimal):
 No bundled Harbor was deployed.  The controller expects an
 existing Harbor instance.  Make sure:
 
-  - The admin password secret exists:
+  - The admin password Secret exists in namespace {{ .Release.Namespace }}:
+
     kubectl -n {{ .Release.Namespace }} create secret generic harbor-admin-password \
       --from-literal=password=<your-harbor-admin-password>
 

@@ -38,6 +38,11 @@ spec:
             {{- if .Values.leaderElection.enabled }}
             - --leader-elect
             {{- end }}
+            {{- range .Values.controllerArgs }}
+            {{- if and $.Values.leaderElection.enabled (eq . "--leader-elect") }}{{- else }}
+            - {{ . }}
+            {{- end }}
+            {{- end }}
           env:
             - name: HARBOR_ENDPOINT
               value: {{ .Values.harbor.endpoint | quote }}
@@ -50,7 +55,7 @@ spec:
                   key: {{ .Values.harbor.adminPasswordSecret.key }}
                   optional: false
             - name: REGISTRY_HOST
-              value: {{ .Values.harbor.registryHost | quote }}
+              value: {{ include "harbor-controller.registryHost" . | quote }}
           {{- with .Values.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
