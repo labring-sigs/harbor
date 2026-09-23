@@ -1,0 +1,126 @@
+# Default values for harbor-controller.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Number of replicas
+replicas: 1
+
+# Image configuration
+image:
+  repository: ghcr.io/dinoallo/labring-sigs-harbor
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+# Image pull secrets
+imagePullSecrets: []
+
+# Name override for resources
+nameOverride: ""
+fullnameOverride: ""
+
+# ServiceAccount configuration
+serviceAccount:
+  # Specifies whether a ServiceAccount should be created
+  create: true
+  # Annotations to add to the ServiceAccount
+  annotations: {}
+  # The name of the ServiceAccount to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+# RBAC configuration
+rbac:
+  # Specifies whether ClusterRole and ClusterRoleBinding should be created
+  create: true
+
+# Harbor connection settings
+harbor:
+  endpoint: "https://core.harbor.svc:8443"
+  adminUsername: "admin"
+  # Harbor admin password (stored in a Kubernetes secret)
+  adminPasswordSecret:
+    name: "harbor-admin-password"
+    key: "password"
+  registryHost: "registry.sealos.io"
+
+# Controller command-line arguments
+controllerArgs:
+  - --leader-elect
+
+# Metrics configuration
+metrics:
+  # Bind address for the metrics endpoint
+  bindAddress: ":8080"
+  # ServiceMonitor configuration (requires prometheus-operator stack)
+  serviceMonitor:
+    enabled: false
+    interval: "30s"
+    scrapeTimeout: "10s"
+    labels: {}
+
+# Health and readiness probes
+probes:
+  health:
+    path: /healthz
+    port: 8081
+    initialDelaySeconds: 15
+    periodSeconds: 20
+  readiness:
+    path: /readyz
+    port: 8081
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+# Resource limits and requests
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Additional pod annotations
+podAnnotations: {}
+
+# Additional pod labels
+podLabels: {}
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  # seccompProfile:
+  #   type: RuntimeDefault
+
+# Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsUser: 65532
+  runAsGroup: 65532
+
+# Service configuration
+service:
+  enabled: true
+  port: 8080
+  targetPort: metrics
+  type: ClusterIP
+  annotations: {}
+  labels: {}
+
+# Leader election
+leaderElection:
+  enabled: true
+  id: "harbor.sealos.io"

@@ -1,0 +1,22 @@
+# Patterns to ignore when building Helm packages.
+# This is the default Helm .helmignore file.
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Test and build artifacts
+*.test
+*.out
+vendor/

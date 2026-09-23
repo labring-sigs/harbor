@@ -1,0 +1,15 @@
+apiVersion: v2
+name: harbor-controller
+description: A Kubernetes controller that manages Harbor project and robot account lifecycles via a custom CRD (HarborProject)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/dinoallo/labring-sigs-harbor
+keywords:
+  - harbor
+  - controller
+  - crd
+  - sealos
+sources:
+  - https://github.com/dinoallo/labring-sigs-harbor
+maintainers: []

@@ -1,0 +1,202 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+  name: harborprojects.harbor.sealos.io
+spec:
+  group: harbor.sealos.io
+  names:
+    kind: HarborProject
+    listKind: HarborProjectList
+    plural: harborprojects
+    singular: harborproject
+    shortNames:
+    - hp
+    - hproj
+  scope: Cluster
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: HarborProject is the Schema for the harborprojects API
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: HarborProjectSpec defines the desired state of HarborProject
+            properties:
+              autoScan:
+                default: false
+                description: Enables automatic vulnerability scanning on push
+                type: boolean
+              displayName:
+                description: Human-readable display name of the project
+                type: string
+              namespaceRefs:
+                description: Target Kubernetes namespace names where docker credentials
+                  will be distributed
+                items:
+                  type: string
+                type: array
+              owner:
+                description: Final owner of this project, used for metering and billing.
+                  Typically a user ID, tenant ID, or namespace UID.
+                type: string
+              projectName:
+                description: Name of the project in Harbor. If empty, auto-generated
+                  as "hp-{name}".
+                type: string
+              public:
+                default: false
+                description: Makes the project publicly pullable without authentication
+                type: boolean
+              robotPermissions:
+                default:
+                - action: push
+                - action: pull
+                description: List of robot account permission actions (push/pull)
+                items:
+                  properties:
+                    action:
+                      enum:
+                      - push
+                      - pull
+                      - scanner-pull
+                      type: string
+                  required:
+                  - action
+                  type: object
+                type: array
+              storageLimit:
+                default: -1
+                description: Storage quota in bytes. -1 means unlimited.
+                format: int64
+                type: integer
+            type: object
+          status:
+            description: HarborProjectStatus defines the observed state of HarborProject
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: 'lastTransitionTime is the last time the condition
+                        transitioned from one status to another.
+
+                        This should be when the underlying condition changed. If that
+                        is not known, then using the time when the API field changed
+                        is acceptable.'
+                      format: date-time
+                      type: string
+                    message:
+                      description: 'message is a human readable message indicating
+                        details about the transition.
+
+                        This may be an empty string.'
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: 'observedGeneration represents the .metadata.generation
+                        that the condition was set based upon.
+
+                        For instance, if .metadata.generation is currently 12, but
+                        the .status.conditions[x].observedGeneration is 9, the condition
+                        is out of date
+
+                        with respect to the current state of the instance.'
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: 'reason contains a programmatic identifier indicating
+                        the reason for the condition''s last transition.
+
+                        Producers of specific condition types may define expected
+                        values and meanings for this field,
+
+                        and whether the values are considered a guaranteed API.
+
+                        The value should be a CamelCase string.'
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - 'True'
+                      - 'False'
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              harborProjectID:
+                description: Numeric ID of the project in Harbor
+                format: int64
+                type: integer
+              harborProjectName:
+                description: Name of the project in Harbor
+                type: string
+              observedGeneration:
+                description: Last observed generation of the CR
+                format: int64
+                type: integer
+              owner:
+                description: Final owner of this project, propagated from spec
+                type: string
+              phase:
+                description: Current lifecycle phase of the HarborProject
+                enum:
+                - Pending
+                - Creating
+                - Ready
+                - Deleting
+                - Failed
+                type: string
+              robotID:
+                description: Numeric ID of the robot account in Harbor
+                format: int64
+                type: integer
+              robotName:
+                description: Name of the robot account
+                type: string
+            type: object
+        type: object
+    additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.harborProjectID
+      name: ProjectID
+      type: integer
+    - jsonPath: .status.robotID
+      name: RobotID
+      type: integer
+    - jsonPath: .status.owner
+      name: Owner
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    served: true
+    storage: true
+    subresources:
+      status: {}

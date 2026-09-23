@@ -1,0 +1,77 @@
+{{- if .Values.harbor.enabled }}
+╔══════════════════════════════════════════════════════════════╗
+║  Harbor Stack deployed – bundled Harbor + Controller        ║
+╚══════════════════════════════════════════════════════════════╝
+
+Bundled Harbor (minimal):
+  - Harbor Core, Registry, JobService, Database, Redis
+  - Portal, Trivy, Notary, ChartMuseum, Exporter → disabled
+
+1. Create the shared admin password secret:
+
+   kubectl -n {{ .Release.Namespace }} create secret generic harbor-admin-password \
+     --from-literal=password=<your-harbor-admin-password>
+
+2. Wait for Harbor to become ready:
+
+   kubectl -n {{ .Release.Namespace }} get pods \
+     -l app.kubernetes.io/component=harbor
+
+3. The controller will connect to the bundled Harbor at:
+   http://harbor.{{ .Release.Namespace }}.svc:80
+
+4. Check the controller logs:
+
+   kubectl -n {{ .Release.Namespace }} logs \
+     deployment/{{ .Release.Name }}-harbor-controller
+
+5. Create a HarborProject:
+
+   cat <<EOF | kubectl apply -f -
+   apiVersion: harbor.sealos.io/v1
+   kind: HarborProject
+   metadata:
+     name: my-project
+   spec:
+     displayName: "My Project"
+     owner: "user"
+     namespaceRefs:
+       - default
+   EOF
+
+{{- else }}
+╔══════════════════════════════════════════════════════════════╗
+║  Harbor Stack deployed – controller only (external Harbor)  ║
+╚══════════════════════════════════════════════════════════════╝
+
+No bundled Harbor was deployed.  The controller expects an
+existing Harbor instance.  Make sure:
+
+  - The admin password secret exists:
+    kubectl -n {{ .Release.Namespace }} create secret generic harbor-admin-password \
+      --from-literal=password=<your-harbor-admin-password>
+
+  - Update the controller's harbor.endpoint to point to your
+    external Harbor, e.g.:
+    helm upgrade {{ .Release.Name }} ./charts/harbor-stack \
+      --set harbor-controller.harbor.endpoint=https://your-harbor.example.com
+
+1. Check the controller logs:
+
+   kubectl -n {{ .Release.Namespace }} logs \
+     deployment/{{ .Release.Name }}-harbor-controller
+
+2. Create a HarborProject:
+
+   cat <<EOF | kubectl apply -f -
+   apiVersion: harbor.sealos.io/v1
+   kind: HarborProject
+   metadata:
+     name: my-project
+   spec:
+     displayName: "My Project"
+     owner: "user"
+     namespaceRefs:
+       - default
+   EOF
+{{- end }}

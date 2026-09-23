@@ -1,0 +1,28 @@
+apiVersion: v2
+name: harbor
+description: |
+  Minimal Harbor deployment wrapper for the Harbor Controller.
+  Disables unnecessary components (Portal, Trivy, Notary, ChartMuseum, Exporter)
+  and keeps only Core, Registry, JobService, Database, and Redis.
+type: application
+version: 0.1.0
+appVersion: "2.15.2"
+home: https://goharbor.io
+keywords:
+  - harbor
+  - registry
+  - container
+  - images
+sources:
+  - https://github.com/goharbor/harbor
+  - https://github.com/goharbor/harbor-helm
+maintainers:
+  - name: Harbor project
+    url: https://goharbor.io
+dependencies:
+  - name: harbor
+    version: "1.19.2"
+    repository: "https://helm.goharbor.io"
+    # The condition is evaluated against the wrapper chart's own values.
+    # .Values.enabled (top-level) controls whether to deploy Harbor.
+    condition: enabled

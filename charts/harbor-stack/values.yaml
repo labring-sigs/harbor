@@ -1,0 +1,92 @@
+# ---------------------------------------------------------------------------
+# Unified values for the harbor-stack umbrella chart.
+#
+# Two subcharts are included:
+#   1) harbor       — minimal Harbor deployment (disabled by default)
+#   2) harbor-controller — the HarborProject CRD controller (always enabled)
+#
+# Set `harbor.enabled=false` (the default) to use an existing external
+# Harbor instance.  Set `harbor.enabled=true` to deploy a bundled minimal
+# Harbor alongside the controller.
+# ---------------------------------------------------------------------------
+
+# ── Harbor (minimal) ───────────────────────────────────────────────────────
+harbor:
+  # Set to true to deploy a bundled minimal Harbor instance.
+  enabled: false
+
+  # The initial admin password.  This is used to create the shared
+  # Kubernetes secret that the controller also references.
+  # Must match harbor.harborAdminPassword in the harbor subchart values.
+  adminPassword: "Harbor12345"
+
+  # These values are forwarded to the harbor subchart,
+  # which in turn forwards them to the official harbor-helm subchart.
+  # See charts/harbor/values.yaml for all available options.
+  harbor:
+    expose:
+      type: clusterIP
+      clusterIP:
+        name: harbor
+        ports:
+          httpPort: 80
+          httpsPort: 443
+    externalURL: http://harbor:80
+    portal:
+      enabled: false
+    trivy:
+      enabled: false
+    notary:
+      enabled: false
+    chartmuseum:
+      enabled: false
+    exporter:
+      enabled: false
+    persistence:
+      enabled: true
+    database:
+      type: internal
+    redis:
+      type: internal
+
+# ── Harbor Controller ──────────────────────────────────────────────────────
+harbor-controller:
+  enabled: true
+
+  # When deploying bundled Harbor, point the controller to the local
+  # Harbor service.  When using external Harbor, override these values.
+  harbor:
+    endpoint: "http://harbor:80"
+    adminUsername: "admin"
+    adminPasswordSecret:
+      name: "harbor-admin-password"
+      key: "password"
+    registryHost: "harbor:80"
+
+  image:
+    repository: ghcr.io/dinoallo/labring-sigs-harbor
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+  controllerArgs:
+    - --leader-elect
+
+  probes:
+    health:
+      path: /healthz
+      port: 8081
+      initialDelaySeconds: 15
+      periodSeconds: 20
+    readiness:
+      path: /readyz
+      port: 8081
+      initialDelaySeconds: 5
+      periodSeconds: 10
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

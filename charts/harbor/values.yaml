@@ -1,0 +1,127 @@
+# ---------------------------------------------------------------------------
+# Minimal Harbor deployment values for the Harbor Controller.
+# Only the components needed for project/robot-account management are enabled:
+#   ✅ core       (Harbor API — required)
+#   ✅ registry   (OCI distribution — required)
+#   ✅ jobservice (internal async tasks — required)
+#   ✅ database   (PostgreSQL — required by core)
+#   ✅ redis      (required by core & jobservice)
+#
+#   ❌ portal     (Web UI — not needed, controller manages via API)
+#   ❌ trivy      (Vulnerability scanner — not required)
+#   ❌ notary     (Content trust — not required)
+#   ❌ chartmuseum (Helm chart repo — not required)
+#   ❌ exporter   (Metrics exporter — not required)
+# ---------------------------------------------------------------------------
+# NOTE: Values for the official harbor-helm subchart are nested under the
+# `harbor:` key.  The top-level keys in this file are the **wrapper chart's**
+# own values.
+# ---------------------------------------------------------------------------
+
+# ── Wrapper chart options ──────────────────────────────────────────────────
+# Set to false to disable deploying Harbor altogether
+enabled: true
+
+# ── Subchart overrides (these are forwarded to the official harbor-helm) ──
+harbor:
+  # ---- Initial admin password (default: "Harbor12345") ----
+  # Change this immediately after deployment!
+  harborAdminPassword: "Harbor12345"
+
+  # ---- Networking ----
+  expose:
+    type: clusterIP
+    tls:
+      enabled: false
+      certSource: auto
+    clusterIP:
+      name: harbor
+      ports:
+        httpPort: 80
+        httpsPort: 443
+    ingress:
+      hosts:
+        core: core.harbor.domain
+
+  # The external URL for token generation
+  externalURL: http://harbor:80
+
+  # ---- Components to disable ----
+  portal:
+    enabled: false
+
+  trivy:
+    enabled: false
+
+  notary:
+    enabled: false
+
+  chartmuseum:
+    enabled: false
+
+  exporter:
+    enabled: false
+
+  # ---- Components to keep (defaults are fine) ----
+  # core:          (kept)
+  # registry:      (kept)
+  # jobservice:    (kept)
+  # database:      (kept)
+  # redis:         (kept)
+
+  # ---- Persistence ----
+  persistence:
+    enabled: true
+    # persistentVolumeClaim:
+    #   registry:
+    #     storageClass: ""
+    #     size: 100Gi
+    #   jobservice:
+    #     storageClass: ""
+    #     size: 10Gi
+    #   database:
+    #     storageClass: ""
+    #     size: 10Gi
+    #   redis:
+    #     storageClass: ""
+    #     size: 5Gi
+
+  # ---- Database ----
+  database:
+    type: internal
+    internal:
+      image:
+        repository: docker.io/goharbor/harbor-db
+        tag: v2.15.2
+
+  # ---- Redis ----
+  redis:
+    type: internal
+    internal:
+      image:
+        repository: docker.io/goharbor/valkey-photon
+        tag: v2.15.2
+
+  # ---- Resource sizing (adjust as needed for your cluster) ----
+  # resources:
+  #   core:
+  #     requests:
+  #       cpu: 500m
+  #       memory: 512Mi
+  #     limits:
+  #       cpu: 1
+  #       memory: 1Gi
+  #   registry:
+  #     requests:
+  #       cpu: 300m
+  #       memory: 256Mi
+  #     limits:
+  #       cpu: 500m
+  #       memory: 512Mi
+  #   jobservice:
+  #     requests:
+  #       cpu: 300m
+  #       memory: 256Mi
+  #     limits:
+  #       cpu: 500m
+  #       memory: 512Mi

@@ -1,0 +1,32 @@
+apiVersion: v2
+name: harbor-stack
+description: |
+  Umbrella chart that deploys both a minimal Harbor instance and
+  the Harbor Controller together in a single `helm install` command.
+
+  The Harbor deployment strips out unnecessary components (Portal,
+  Trivy, Notary, ChartMuseum, Exporter) and keeps only what the
+  controller needs: Core API, Registry, JobService, Database, Redis.
+
+  Set `harbor.enabled=false` to skip Harbor and use an existing
+  external Harbor instance instead.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/dinoallo/labring-sigs-harbor
+keywords:
+  - harbor
+  - controller
+  - crd
+  - sealos
+sources:
+  - https://github.com/dinoallo/labring-sigs-harbor
+dependencies:
+  - name: harbor
+    version: "0.1.0"
+    repository: "file://../harbor"
+    condition: harbor.enabled
+  - name: harbor-controller
+    version: "0.1.0"
+    repository: "file://../harbor-controller"
+    condition: harbor-controller.enabled
