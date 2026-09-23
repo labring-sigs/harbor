@@ -29,12 +29,9 @@ harbor:
     existingSecretAdminPassword: "harbor-admin-password"
     existingSecretAdminPasswordKey: "password"
     expose:
-      type: ingress
+      type: clusterIP
       tls:
-        enabled: true
-        certSource: secret
-        secret:
-          secretName: ""
+        enabled: false
       clusterIP:
         name: harbor
         ports:
@@ -49,7 +46,7 @@ harbor:
           nginx.ingress.kubernetes.io/ssl-redirect: "true"
           nginx.ingress.kubernetes.io/proxy-body-size: "0"
 
-    externalURL: https://core.harbor.domain
+    externalURL: http://core.harbor.domain
     portal:
       enabled: false
     trivy:

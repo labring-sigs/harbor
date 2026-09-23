@@ -30,12 +30,9 @@ harbor:
 
   # ---- Networking ----
   expose:
-    type: ingress
+    type: clusterIP
     tls:
-      enabled: true
-      certSource: secret
-      secret:
-        secretName: ""
+      enabled: false
     clusterIP:
       name: harbor
       ports:
@@ -51,7 +48,7 @@ harbor:
         nginx.ingress.kubernetes.io/proxy-body-size: "0"
 
   # The external URL for token generation
-  externalURL: https://core.harbor.domain
+  externalURL: http://core.harbor.domain
 
   # ---- Components to disable ----
   portal:

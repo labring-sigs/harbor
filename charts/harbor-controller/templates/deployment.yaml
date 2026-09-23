@@ -37,6 +37,10 @@ spec:
           args:
             {{- if .Values.leaderElection.enabled }}
             - --leader-elect
+            - --leader-election-id={{ .Values.leaderElection.id }}
+            {{- end }}
+            {{- if .Values.metrics.bindAddress }}
+            - --metrics-bind-address={{ .Values.metrics.bindAddress }}
             {{- end }}
             {{- range .Values.controllerArgs }}
             {{- if and $.Values.leaderElection.enabled (eq . "--leader-elect") }}{{- else }}
