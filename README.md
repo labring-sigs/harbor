@@ -62,32 +62,183 @@ A Kubernetes controller that manages [Harbor](https://goharbor.io/) project and 
 
 ## Installation
 
-### 1. Create namespace and deploy RBAC
+You can deploy the controller using either raw Kubernetes manifests or Helm charts.
+
+### Option A: Raw manifests (quick start)
 
 ```bash
 kubectl create namespace harbor-system
+kubectl apply -f deploy/crds/harbor.sealos.io_harborprojects.yaml
 kubectl apply -f deploy/rbac.yaml
-```
-
-### 2. Set Harbor admin password
-
-```bash
 kubectl -n harbor-system create secret generic harbor-admin-password \
   --from-literal=password=<your-harbor-admin-password>
-```
-
-### 3. Deploy the controller
-
-```bash
-kubectl apply -f deploy/crds/harbor.sealos.io_harborprojects.yaml
 kubectl apply -f deploy/deployment.yaml
 ```
 
-### 4. Verify
+Verify:
 
 ```bash
 kubectl -n harbor-system get pods -l app.kubernetes.io/name=harbor-controller
 ```
+
+### Option B: Helm charts (recommended)
+
+Three Helm charts are provided in the `charts/` directory:
+
+| Chart | Path | Description |
+|-------|------|-------------|
+| `harbor-controller` | `charts/harbor-controller/` | Standalone HarborProject CRD controller (Deployment, RBAC, CRDs) |
+| `harbor` | `charts/harbor/` | Minimal Harbor wrapper — disables Portal, Trivy, Notary, ChartMuseum, Exporter |
+| `harbor-stack` | `charts/harbor-stack/` | Umbrella chart bundling both Harbor + Controller for a single-command install |
+
+#### Prerequisites
+
+- Helm 3.8+
+- Kubernetes 1.22+
+- The official Harbor Helm chart repository (required by the `harbor` chart):
+
+```bash
+helm repo add harbor https://helm.goharbor.io
+helm repo update
+```
+
+#### Build chart dependencies
+
+Before installing any chart that depends on the official `harbor-helm` chart, build the
+dependency:
+
+```bash
+cd charts/harbor
+helm dependency build
+```
+
+The `harbor-stack` umbrella chart also needs its subchart dependencies resolved:
+
+```bash
+cd charts/harbor-stack
+helm dependency build
+```
+
+#### Scenario 1: Controller with an external Harbor instance (default)
+
+Install the controller alone and point it at an existing Harbor service:
+
+```bash
+# Create the admin password Secret (required)
+kubectl create namespace harbor-system
+kubectl -n harbor-system create secret generic harbor-admin-password \
+  --from-literal=password=<your-harbor-admin-password>
+
+# Install the controller
+helm install harbor-controller charts/harbor-controller \
+  --namespace harbor-system --create-namespace \
+  --set harbor.endpoint=https://harbor.example.com \
+  --set harbor.registryHost=harbor.example.com
+```
+
+#### Scenario 2: Bundled Harbor + Controller (all-in-one)
+
+Deploy a minimal Harbor instance alongside the controller with a single command:
+
+```bash
+# Build dependencies first
+cd charts/harbor-stack && helm dependency build
+
+# Install the stack with bundled Harbor
+helm install harbor-stack . \
+  --namespace harbor-system --create-namespace \
+  --set harbor.enabled=true \
+  --set harbor.adminPassword=<your-admin-password>
+```
+
+> **Important:** Change the default admin password (`Harbor12345`) immediately after first deploy.
+
+#### Scenario 3: Harbor only
+
+Deploy the minimal Harbor wrapper chart on its own:
+
+```bash
+cd charts/harbor && helm dependency build
+helm install harbor . --namespace harbor-system --create-namespace
+```
+
+#### Configuration reference
+
+##### Harbor controller (`charts/harbor-controller/values.yaml`)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `harbor.endpoint` | `https://core.harbor.svc:8443` | Harbor API endpoint |
+| `harbor.adminUsername` | `admin` | Harbor admin username |
+| `harbor.adminPasswordSecret.name` | `harbor-admin-password` | Secret name for the admin password |
+| `harbor.adminPasswordSecret.key` | `password` | Secret key for the admin password |
+| `harbor.registryHost` | `registry.sealos.io` | Registry hostname in dockerconfigjson Secrets |
+| `leaderElection.enabled` | `true` | Enable leader election for HA |
+| `controllerArgs` | `[]` | Additional controller arguments (managed by `leaderElection`) |
+| `metrics.serviceMonitor.create` | `false` | Create a Prometheus ServiceMonitor |
+
+##### Minimal Harbor (`charts/harbor/values.yaml`)
+
+All values under the `harbor:` key are forwarded to the official
+[`harbor-helm`](https://github.com/goharbor/harbor-helm) chart.
+Key defaults specific to this wrapper:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `harbor.expose.type` | `ingress` | Expose type: `ingress`, `clusterIP`, `nodePort`, or `loadBalancer` |
+| `harbor.expose.tls.certSource` | `secret` | TLS certificate source: `auto`, `secret`, or `none` |
+| `harbor.externalURL` | `https://core.harbor.domain` | External URL (used for token generation) |
+| `harbor.database.type` | `internal` | Database backend: `internal` (bundled PostgreSQL) or `external` |
+| `harbor.redis.type` | `internal` | Redis backend: `internal` (bundled Valkey) or `external` |
+| `harbor.persistence.enabled` | `true` | Enable persistent volumes |
+
+Components **disabled** by default: Portal, Trivy, Notary, ChartMuseum, Exporter.
+Components **enabled**: Core, Registry, JobService, Database, Redis.
+
+##### Harbor stack (`charts/harbor-stack/values.yaml`)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `harbor.enabled` | `false` | Set to `true` to deploy bundled Harbor |
+| `harbor.adminPassword` | `Harbor12345` | Initial admin password (creates the shared Secret) |
+| `harbor-controller.harbor.endpoint` | `http://harbor:80` | Controller endpoint (auto-configured for bundled mode) |
+| `harbor-controller.harbor.registryHost` | `harbor:80` | Registry host (auto-configured for bundled mode) |
+
+#### Admin password management
+
+- **Standalone controller:** You must create the `harbor-admin-password` Secret manually
+  in the target namespace before the controller starts.
+- **Bundled stack (`harbor.enabled=true`):** The chart automatically creates the
+  shared Secret from `.Values.harbor.adminPassword`. Both Harbor and the controller
+  reference the same Secret.
+- **Post-deploy password change:** Update the Secret data, then restart the controller
+  pod and the Harbor core pod.
+
+#### Ingress and TLS
+
+When using `harbor.expose.type: ingress` (the default), the chart creates an Ingress
+resource for the Harbor Core API. By default, TLS is enabled with `certSource: secret`,
+meaning you must provide a TLS certificate Secret or set `certSource: auto` for
+auto-provisioned certificates (e.g., Let's Encrypt via cert-manager).
+
+To configure a custom domain:
+
+```bash
+helm install harbor-stack charts/harbor-stack \
+  --set harbor.harbor.expose.ingress.hosts.core=harbor.mycompany.com \
+  --set harbor.harbor.externalURL=https://harbor.mycompany.com
+```
+
+#### Database and Redis migration
+
+Both `database.type` and `redis.type` default to `internal`, which deploys
+containers within the cluster. To migrate to external instances after deployment:
+
+1. Provision your external PostgreSQL / Redis
+2. Update the values to use `type: external` with the appropriate connection
+   parameters (see the [upstream chart docs](https://github.com/goharbor/harbor-helm))
+3. Run `helm upgrade` to apply the changes
+
 
 ## Usage
 
