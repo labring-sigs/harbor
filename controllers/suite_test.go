@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -21,17 +22,27 @@ import (
 	"github.com/dinoallo/labring-sigs-harbor/internal/harbor"
 )
 
+const (
+	envtestTimeout = 30 * time.Second
+)
+
 // setupEnvTest starts a local control plane for integration testing.
 // It returns the environment (which must be stopped), the reconciler, and
 // a cleanup function.
 //
 // Usage requires controller-testing binaries (etcd, kube-apiserver) available
 // on the PATH or configured via KUBEBUILDER_ASSETS.
-func setupEnvTest(t *testing.T) (*envtest.Environment, *HarborProjectReconciler, context.Context, func()) {
+//
+// IMPORTANT: This function does NOT start the controller-runtime manager or
+// register the reconciler with it. Tests call reconciler.Reconcile() directly
+// to avoid races between the manager's watch-triggered reconciliation and the
+// test's explicit reconciliation. This also avoids the "controller with name
+// X already exists" error that occurs when running multiple envtest-based tests
+// in the same binary (the controller name is registered globally via metrics).
+func setupEnvTest(t *testing.T) (*envtest.Environment, *HarborProjectReconciler, context.Context, context.CancelFunc, func()) {
 	t.Helper()
 
 	logf.SetLogger(zap.New(zap.UseDevMode(true)))
-
 
 	// Determine CRD directory
 	crdDir := findCRDDir(t)
@@ -57,42 +68,32 @@ func setupEnvTest(t *testing.T) (*envtest.Environment, *HarborProjectReconciler,
 		t.Fatalf("failed to add corev1 scheme: %v", err)
 	}
 
-	// Create manager
-	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
-		Scheme: scheme,
-	})
+	// Create a direct client (no cache) backed by the envtest API server.
+	// We intentionally avoid creating a controller-runtime Manager here because:
+	//   a) Manager starts background watches that trigger redundant reconciliation,
+	//      causing races with test-driven Reconcile() calls and "context canceled"
+	//      errors on parallel API updates.
+	//   b) The controller name is registered globally (via Prometheus metrics),
+	//      so a second test in the same binary would fail with
+	//      "controller with name X already exists".
+	// Tests drive reconciliation explicitly via reconciler.Reconcile().
+	c, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
 		_ = env.Stop()
-		t.Fatalf("failed to create manager: %v", err)
+		t.Fatalf("failed to create client: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), envtestTimeout)
 
 	// Create an in-memory Harbor mock that can track state across reconciliation.
 	mockHarbor := &mockIntegrationHarborClient{}
 
 	reconciler := &HarborProjectReconciler{
-		Client:       mgr.GetClient(),
-		Scheme:       mgr.GetScheme(),
+		Client:       c,
+		Scheme:       scheme,
 		HarborClient: mockHarbor,
 		RegistryHost: "registry.integration-test.local",
 	}
-
-	if err := reconciler.SetupWithManager(mgr); err != nil {
-		_ = env.Stop()
-		cancel()
-		t.Fatalf("failed to setup controller: %v", err)
-	}
-
-	// Start manager in background
-	go func() {
-		if err := mgr.Start(ctx); err != nil {
-			t.Logf("manager stopped: %v", err)
-		}
-	}()
-
-	// Wait for manager to be ready
-	time.Sleep(200 * time.Millisecond)
 
 	cleanup := func() {
 		cancel()
@@ -101,17 +102,22 @@ func setupEnvTest(t *testing.T) (*envtest.Environment, *HarborProjectReconciler,
 		}
 	}
 
-	return env, reconciler, ctx, cleanup
+	return env, reconciler, ctx, cancel, cleanup
 }
 
 func findCRDDir(t *testing.T) string {
 	t.Helper()
 
-	// Try several candidate locations
+	// Determine the project root by walking up from the test file location.
+	// In CI the working directory is the project root; locally it may vary.
 	candidates := []string{
+		"deploy/crds",
 		"../deploy/crds",
-		"./deploy/crds",
-		"/root/.herdr/worktrees/labring-sigs-harbor/feat-harbor-initial/deploy/crds",
+	}
+
+	// Also try relative to the test file
+	if wd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(wd, "deploy/crds"))
 	}
 
 	for _, dir := range candidates {
@@ -194,7 +200,7 @@ func TestIntegration_CRD_CreateUpdateDelete(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
-	_, reconciler, ctx, cleanup := setupEnvTest(t)
+	_, reconciler, ctx, _, cleanup := setupEnvTest(t)
 	defer cleanup()
 
 	client := reconciler.Client
@@ -297,7 +303,7 @@ func TestIntegration_CRD_TokenRefresh(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
-	_, reconciler, ctx, cleanup := setupEnvTest(t)
+	_, reconciler, ctx, _, cleanup := setupEnvTest(t)
 	defer cleanup()
 
 	client := reconciler.Client
