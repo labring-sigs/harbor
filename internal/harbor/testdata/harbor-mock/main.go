@@ -21,7 +21,7 @@ type project struct {
 type robotAccount struct {
 	ID    int64  `json:"id"`
 	Name  string `json:"name"`
-	Token string `json:"token,omitempty"`
+	Secret string `json:"secret,omitempty"`
 }
 
 type store struct {
@@ -189,7 +189,7 @@ func handleRobots(w http.ResponseWriter, r *http.Request) {
 		robot := &robotAccount{
 			ID:    id,
 			Name:  req.Name,
-			Token: fmt.Sprintf("tc-mock-token-%d", id),
+			Secret: fmt.Sprintf("tc-mock-secret-%d", id),
 		}
 		globalStore.robots[projectID] = append(globalStore.robots[projectID], robot)
 		globalStore.mu.Unlock()

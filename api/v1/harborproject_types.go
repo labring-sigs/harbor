@@ -6,6 +6,7 @@ import (
 
 // RobotPermission defines a single robot account permission action
 type RobotPermission struct {
+	// +kubebuilder:validation:Enum=push;pull;scanner-pull
 	Action string `json:"action"`
 }
 

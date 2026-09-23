@@ -35,11 +35,13 @@ type RobotAccess struct {
 	Resource string `json:"resource,omitempty"`
 }
 
-// RobotAccount is the full robot account object returned by Harbor API
+// RobotAccount is the full robot account object returned by Harbor API.
+// The creation response returns the credential in the "secret" field.
 type RobotAccount struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
-	Token string `json:"token,omitempty"` // only returned on creation
+	ID     int64  `json:"id"`
+	Name   string `json:"name"`
+	Token  string `json:"token,omitempty"`  // used by mock; real Harbor may send this
+	Secret string `json:"secret,omitempty"` // real Harbor returns secret here
 }
 
 // RobotCredential is the response from the robot account creation API

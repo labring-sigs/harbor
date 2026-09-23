@@ -34,7 +34,7 @@ spec:
                 secretKeyRef:
                   name: harbor-admin-password
                   key: password
-                  optional: true
+                  optional: false
             - name: REGISTRY_HOST
               value: "registry.sealos.io"
           ports:

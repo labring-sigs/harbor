@@ -8,6 +8,7 @@ IMAGE_REPO ?= ghcr.io/dinoallo/labring-sigs-harbor
 all: build
 
 build:
+	mkdir -p bin
 	go build -o bin/$(BINARY) .
 
 docker-build:
@@ -28,4 +29,4 @@ controller-gen:
 
 # Generate deepcopy (requires controller-gen)
 deepcopy-gen:
-	controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
+	controller-gen object:paths="./api/..."

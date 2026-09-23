@@ -63,6 +63,10 @@ spec:
                 items:
                   properties:
                     action:
+                      enum:
+                      - push
+                      - pull
+                      - scanner-pull
                       type: string
                   required:
                   - action

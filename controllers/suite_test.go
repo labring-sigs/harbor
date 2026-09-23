@@ -32,6 +32,7 @@ func setupEnvTest(t *testing.T) (*envtest.Environment, *HarborProjectReconciler,
 
 	logf.SetLogger(zap.New(zap.UseDevMode(true)))
 
+
 	// Determine CRD directory
 	crdDir := findCRDDir(t)
 
@@ -198,6 +199,16 @@ func TestIntegration_CRD_CreateUpdateDelete(t *testing.T) {
 
 	client := reconciler.Client
 
+	// Create the namespace used by the test
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "ns-integration",
+		},
+	}
+	if err := reconciler.Client.Create(ctx, ns); err != nil {
+		t.Fatalf("failed to create namespace: %v", err)
+	}
+
 	// Create a HarborProject
 	hp := &v1.HarborProject{
 		ObjectMeta: metav1.ObjectMeta{
@@ -290,6 +301,16 @@ func TestIntegration_CRD_TokenRefresh(t *testing.T) {
 	defer cleanup()
 
 	client := reconciler.Client
+
+	// Create the namespace used by the test
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "ns-refresh",
+		},
+	}
+	if err := reconciler.Client.Create(ctx, ns); err != nil {
+		t.Fatalf("failed to create namespace: %v", err)
+	}
 
 	// Create a project with the refresh annotation
 	hp := &v1.HarborProject{

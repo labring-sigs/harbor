@@ -139,10 +139,20 @@ kubectl get secret harbor-registry-cred-my-team-project \
 ### Push / pull images
 
 ```bash
+# The robot username and token are stored in the Secret; extract them:
+
+USER=$(kubectl get secret harbor-registry-cred-my-team-project \
+  -n team-ns-alpha \
+  -o jsonpath="{.data.\.dockerconfigjson}" | base64 -d \
+  | python3 -c "import sys,json; c=json.load(sys.stdin); print(list(c['auths'].values())[0]['username'])")
+
+TOKEN=$(kubectl get secret harbor-registry-cred-my-team-project \
+  -n team-ns-alpha \
+  -o jsonpath="{.data.\.dockerconfigjson}" | base64 -d \
+  | python3 -c "import sys,json; c=json.load(sys.stdin); print(list(c['auths'].values())[0]['password'])")
+
 # Login with robot account credentials
-docker login harbor.sealos.example.com \
-  -u robot$team-ns-alpha+my-team-project \
-  -p <token>
+echo "$TOKEN" | docker login harbor.sealos.example.com -u "$USER" --password-stdin
 
 # Push
 docker tag my-app:v1 harbor.sealos.example.com/my-team-project/my-app:v1
@@ -190,7 +200,7 @@ The controller reads these environment variables:
 
 ### Prerequisites
 
-- Go 1.22+
+- Go 1.26+
 - Docker (optional, for building images)
 
 ### Build

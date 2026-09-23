@@ -172,11 +172,6 @@ spec:
                 description: "Project display name"
               namespaceRefs:
                 type: array
-                description: "Target K8s namespaces where Robot Secrets will be distributed"
-                items:
-                  type: string
-              namespaceRefs:
-                type: array
                 description: "Target Kubernetes namespace names where docker credentials will be distributed"
                 items:
                   type: string

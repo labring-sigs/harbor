@@ -6,14 +6,19 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	stderrors "errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "github.com/dinoallo/labring-sigs-harbor/api/v1"
@@ -23,6 +28,7 @@ import (
 const (
 	harborFinalizer  = "harbor.sealos.io/cleanup"
 	refreshAnnotation = "harbor.sealos.io/refresh-token"
+	projectLabel     = "harbor.sealos.io/project"
 )
 
 // HarborProjectReconciler reconciles a HarborProject object
@@ -37,6 +43,7 @@ type HarborProjectReconciler struct {
 // +kubebuilder:rbac:groups=harbor.sealos.io,resources=harborprojects/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=harbor.sealos.io,resources=harborprojects/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="coordination.k8s.io",resources=leases,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile handles HarborProject changes
 func (r *HarborProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -50,9 +57,9 @@ func (r *HarborProjectReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return r.reconcileDelete(ctx, project)
 	}
 
-	// Handle token refresh trigger via annotation
+	// Handle token refresh trigger via annotation (must be exactly "true")
 	if project.Annotations != nil {
-		if _, ok := project.Annotations[refreshAnnotation]; ok && project.Status.Phase == v1.HarborPhaseReady {
+		if v, ok := project.Annotations[refreshAnnotation]; ok && v == "true" && project.Status.Phase == v1.HarborPhaseReady {
 			return r.reconcileRefreshToken(ctx, project)
 		}
 	}
@@ -72,8 +79,8 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Already ready, skip
-	if project.Status.Phase == v1.HarborPhaseReady {
+	// If Ready and ObservedGeneration matches Generation, spec has not changed
+	if project.Status.Phase == v1.HarborPhaseReady && project.Status.ObservedGeneration == project.Generation {
 		return ctrl.Result{}, nil
 	}
 
@@ -148,14 +155,22 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 			project.Status.Phase = v1.HarborPhaseFailed
 			_ = r.Status().Update(ctx, project)
 			return ctrl.Result{}, fmt.Errorf("failed to create secret in namespace %s: %w", ns, err)
+		} else if errors.IsAlreadyExists(err) {
+			// Secret already exists — update it with correct credentials
+			existing := &corev1.Secret{}
+			if getErr := r.Get(ctx, client.ObjectKey{Name: secret.Name, Namespace: ns}, existing); getErr == nil {
+				existing.Data = secret.Data
+				existing.Labels = secret.Labels
+				if updateErr := r.Update(ctx, existing); updateErr != nil {
+					logger.Error(updateErr, "failed to update existing secret in namespace", "namespace", ns)
+				}
+			}
 		}
 	}
 
-	// Mark Ready
+	// Mark as Ready
 	project.Status.Phase = v1.HarborPhaseReady
-	setCondition(&project.Status.Conditions, "ProjectCreated", metav1.ConditionTrue, "Success", "Harbor project created")
-	setCondition(&project.Status.Conditions, "RobotCreated", metav1.ConditionTrue, "Success", "Robot account created")
-	setCondition(&project.Status.Conditions, "SecretCreated", metav1.ConditionTrue, "Success", "K8s secrets distributed")
+	project.Status.ObservedGeneration = project.Generation
 
 	logger.Info("HarborProject reconciled successfully",
 		"project", projectName,
@@ -183,9 +198,15 @@ func (r *HarborProjectReconciler) reconcileDelete(ctx context.Context, project *
 	}
 
 	// Delete Harbor project (cascades to all images + robot accounts)
+	// Handle idempotency: if Harbor returns 404, treat as success
 	if project.Status.HarborProjectID > 0 {
 		if err := r.HarborClient.DeleteProject(ctx, project.Status.HarborProjectID); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to delete harbor project: %w", err)
+			var apiErr *harbor.ErrAPIError
+			if stderrors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+				logger.Info("Harbor project already deleted, proceeding with cleanup")
+			} else {
+				return ctrl.Result{}, fmt.Errorf("failed to delete harbor project: %w", err)
+			}
 		}
 	}
 
@@ -196,13 +217,19 @@ func (r *HarborProjectReconciler) reconcileDelete(ctx context.Context, project *
 
 // buildDockerConfigSecret creates a dockerconfigjson Secret in the given namespace
 func (r *HarborProjectReconciler) buildDockerConfigSecret(project *v1.HarborProject, robot *harbor.RobotAccount, namespace string) *corev1.Secret {
-	auth := base64.StdEncoding.EncodeToString([]byte(robot.Name + ":" + robot.Token))
+	// Use Token if set, otherwise fall back to Secret field (real Harbor API)
+	token := robot.Token
+	if token == "" {
+		token = robot.Secret
+	}
+
+	auth := base64.StdEncoding.EncodeToString([]byte(robot.Name + ":" + token))
 
 	dockerConfig := map[string]interface{}{
 		"auths": map[string]interface{}{
 			r.RegistryHost: map[string]string{
 				"username": robot.Name,
-				"password": robot.Token,
+				"password": token,
 				"auth":     auth,
 			},
 		},
@@ -217,7 +244,7 @@ func (r *HarborProjectReconciler) buildDockerConfigSecret(project *v1.HarborProj
 			Labels: map[string]string{
 				"app.kubernetes.io/managed-by": "harbor-controller",
 				"app.kubernetes.io/name":       "harbor-registry-cred",
-				"harbor.sealos.io/project":     project.Name,
+				projectLabel:                   project.Name,
 			},
 		},
 		Type: corev1.SecretTypeDockerConfigJson,
@@ -227,12 +254,32 @@ func (r *HarborProjectReconciler) buildDockerConfigSecret(project *v1.HarborProj
 	}
 }
 
-// SetupWithManager sets up the controller with the Manager
+// SetupWithManager sets up the controller with the Manager.
+// Uses label-based watch for Secrets instead of Owns(), because
+// cluster-scoped HarborProject cannot be an owner of namespaced Secrets.
 func (r *HarborProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1.HarborProject{}).
-		Owns(&corev1.Secret{}).
+		Watches(
+			&corev1.Secret{},
+			handler.TypedEnqueueRequestsFromMapFunc(r.mapSecretToProject),
+		).
 		Complete(r)
+}
+
+// mapSecretToProject maps a Secret back to its parent HarborProject using labels.
+func (r *HarborProjectReconciler) mapSecretToProject(ctx context.Context, obj client.Object) []reconcile.Request {
+	secret, ok := obj.(*corev1.Secret)
+	if !ok {
+		return nil
+	}
+	projectName, ok2 := secret.Labels[projectLabel]
+	if !ok2 || projectName == "" {
+		return nil
+	}
+	return []reconcile.Request{
+		{NamespacedName: types.NamespacedName{Name: projectName}},
+	}
 }
 
 // reconcileRefreshToken performs a token rotation for the robot account:
@@ -294,10 +341,16 @@ func (r *HarborProjectReconciler) reconcileRefreshToken(ctx context.Context, pro
 	}
 
 	// 3. Delete the old robot by ID (if we have an old record)
+	//    If the old robot is already gone (e.g. from a previous retry), continue.
 	if oldRobotID > 0 {
 		if err := r.HarborClient.DeleteProjectRobot(ctx, projectID, oldRobotID); err != nil {
-			logger.Error(err, "failed to delete old robot", "oldRobotID", oldRobotID)
-			return ctrl.Result{}, fmt.Errorf("failed to delete old robot %d: %w", oldRobotID, err)
+			var apiErr *harbor.ErrAPIError
+			if stderrors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+				logger.Info("Old robot already deleted, proceeding", "oldRobotID", oldRobotID)
+			} else {
+				logger.Error(err, "failed to delete old robot", "oldRobotID", oldRobotID)
+				return ctrl.Result{}, fmt.Errorf("failed to delete old robot %d: %w", oldRobotID, err)
+			}
 		}
 	}
 
@@ -333,7 +386,7 @@ func toAccess(permissions []v1.RobotPermission) []harbor.RobotAccess {
 	for _, p := range permissions {
 		access = append(access, harbor.RobotAccess{
 			Action:   p.Action,
-			Resource: "",
+			Resource: "repository",
 		})
 	}
 	return access

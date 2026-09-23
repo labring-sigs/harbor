@@ -35,13 +35,14 @@ func NewClient(baseURL, username, password string) *Client {
 // --- Project API ---
 
 // CreateProject creates a new Harbor project and returns its ID
+// NOTE: storage_limit is a top-level field in Harbor v2.x API, not inside metadata.
 func (c *Client) CreateProject(ctx context.Context, spec ProjectSpec) (int64, error) {
 	body := map[string]interface{}{
-		"project_name": spec.Name,
+		"project_name":  spec.Name,
+		"storage_limit": spec.StorageLimit,
 		"metadata": map[string]interface{}{
-			"public":        strconv.FormatBool(spec.Public),
-			"auto_scan":     strconv.FormatBool(spec.AutoScan),
-			"storage_limit": strconv.FormatInt(spec.StorageLimit, 10),
+			"public":    strconv.FormatBool(spec.Public),
+			"auto_scan": strconv.FormatBool(spec.AutoScan),
 		},
 	}
 	resp, err := c.post(ctx, "/api/v2.0/projects", body)
@@ -108,8 +109,8 @@ func (c *Client) DeleteProject(ctx context.Context, projectID int64) error {
 
 // --- Robot Account API ---
 
-// CreateRobot creates a robot account for a project and returns the full RobotAccount (ID + Name + Token).
-// The token is only returned on creation.
+// CreateRobot creates a robot account for a project and returns the full RobotAccount (ID + Name + Token/Secret).
+// The token/secret is only returned on creation.
 func (c *Client) CreateRobot(ctx context.Context, projectID int64, spec RobotSpec) (*RobotAccount, error) {
 	body := map[string]interface{}{
 		"name":        spec.Name,
@@ -130,6 +131,10 @@ func (c *Client) CreateRobot(ctx context.Context, projectID int64, spec RobotSpe
 	var robot RobotAccount
 	if err := json.NewDecoder(resp.Body).Decode(&robot); err != nil {
 		return nil, fmt.Errorf("harbor: failed to decode robot account: %w", err)
+	}
+	// If we got a secret but no token, populate token from secret
+	if robot.Token == "" && robot.Secret != "" {
+		robot.Token = robot.Secret
 	}
 	return &robot, nil
 }
