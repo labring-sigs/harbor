@@ -1,0 +1,283 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// In-memory store simulating Harbor resources
+type project struct {
+	ID   int64  `json:"project_id"`
+	Name string `json:"name"`
+}
+
+type robotAccount struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Token string `json:"token,omitempty"`
+}
+
+type store struct {
+	mu       sync.Mutex
+	projects map[string]*project
+	robots   map[int64][]*robotAccount
+	nextPID  int64
+	nextRID  int64
+	now      func() time.Time
+}
+
+func newStore() *store {
+	return &store{
+		projects: make(map[string]*project),
+		robots:   make(map[int64][]*robotAccount),
+		nextPID:  1,
+		nextRID:  1,
+		now:      time.Now,
+	}
+}
+
+var globalStore = newStore()
+
+// writeJSON writes v as JSON and sets Content-Type.
+func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("error encoding response: %v", err)
+	}
+}
+
+// parseID extracts an integer ID from the last segment of the URL path.
+// For example, "/api/v2.0/projects/42" -> 42.
+func parseID(path string) (int64, bool) {
+	parts := strings.Split(strings.TrimRight(path, "/"), "/")
+	if len(parts) == 0 {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(parts[len(parts)-1], 10, 64)
+	return id, err == nil
+}
+
+func handleProjects(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// GET /api/v2.0/projects?name=xxx
+		name := r.URL.Query().Get("name")
+		globalStore.mu.Lock()
+		defer globalStore.mu.Unlock()
+
+		if name != "" {
+			p, ok := globalStore.projects[name]
+			if !ok {
+				writeJSON(w, http.StatusOK, []project{})
+				return
+			}
+			writeJSON(w, http.StatusOK, []*project{p})
+			return
+		}
+		// Return all projects
+		all := make([]*project, 0, len(globalStore.projects))
+		for _, p := range globalStore.projects {
+			all = append(all, p)
+		}
+		writeJSON(w, http.StatusOK, all)
+
+	case http.MethodPost:
+		// POST /api/v2.0/projects
+		var req struct {
+			Name string `json:"project_name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+			return
+		}
+
+		globalStore.mu.Lock()
+		defer globalStore.mu.Unlock()
+
+		if _, exists := globalStore.projects[req.Name]; exists {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "project already exists"})
+			return
+		}
+
+		id := globalStore.nextPID
+		globalStore.nextPID++
+		p := &project{ID: id, Name: req.Name}
+		globalStore.projects[req.Name] = p
+
+		w.Header().Set("Location", fmt.Sprintf("/api/v2.0/projects/%d", id))
+		w.WriteHeader(http.StatusCreated)
+
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+func handleProjectByID(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := parseID(r.URL.Path)
+	if !ok || projectID == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid project ID"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodDelete:
+		globalStore.mu.Lock()
+		defer globalStore.mu.Unlock()
+
+		// Find and delete the project
+		for name, p := range globalStore.projects {
+			if p.ID == projectID {
+				delete(globalStore.projects, name)
+				delete(globalStore.robots, projectID)
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+		}
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+func handleRobots(w http.ResponseWriter, r *http.Request) {
+	// Extract project ID: /api/v2.0/projects/<projectID>/robots
+	parts := strings.Split(strings.TrimRight(r.URL.Path, "/"), "/")
+	if len(parts) < 5 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+		return
+	}
+	projectID, err := strconv.ParseInt(parts[4], 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid project ID"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		// GET /api/v2.0/projects/<id>/robots
+		globalStore.mu.Lock()
+		robots := globalStore.robots[projectID]
+		if robots == nil {
+			robots = []*robotAccount{}
+		}
+		globalStore.mu.Unlock()
+		writeJSON(w, http.StatusOK, robots)
+
+	case http.MethodPost:
+		// POST /api/v2.0/projects/<id>/robots
+		var req struct {
+			Name     string `json:"name"`
+			Duration int64  `json:"duration"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+			return
+		}
+
+		globalStore.mu.Lock()
+		id := globalStore.nextRID
+		globalStore.nextRID++
+		robot := &robotAccount{
+			ID:    id,
+			Name:  req.Name,
+			Token: fmt.Sprintf("tc-mock-token-%d", id),
+		}
+		globalStore.robots[projectID] = append(globalStore.robots[projectID], robot)
+		globalStore.mu.Unlock()
+
+		writeJSON(w, http.StatusCreated, robot)
+
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+func handleRobotByID(w http.ResponseWriter, r *http.Request) {
+	// Path: /api/v2.0/projects/<projectID>/robots/<robotID>
+	if r.Method != http.MethodDelete {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	parts := strings.Split(strings.TrimRight(r.URL.Path, "/"), "/")
+	if len(parts) < 6 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+		return
+	}
+	projectID, err := strconv.ParseInt(parts[4], 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid project ID"})
+		return
+	}
+	robotID, err := strconv.ParseInt(parts[6], 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid robot ID"})
+		return
+	}
+
+	globalStore.mu.Lock()
+	defer globalStore.mu.Unlock()
+
+	robots := globalStore.robots[projectID]
+	for i, rbt := range robots {
+		if rbt.ID == robotID {
+			globalStore.robots[projectID] = append(robots[:i], robots[i+1:]...)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+	}
+	writeJSON(w, http.StatusNotFound, map[string]string{"error": "robot not found"})
+}
+
+// mux routes requests to the appropriate handler.
+func mux(w http.ResponseWriter, r *http.Request) {
+	log.Printf("%s %s", r.Method, r.URL.Path)
+
+	// BasicAuth enforcement (matches the test client credentials)
+	user, pass, ok := r.BasicAuth()
+	if !ok || user != "admin" || pass != "harbor12345" {
+		w.Header().Set("WWW-Authenticate", `Basic realm="Harbor"`)
+		w.WriteHeader(http.StatusUnauthorized)
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	path := r.URL.Path
+
+	switch {
+	case path == "/api/v2.0/projects":
+		handleProjects(w, r)
+
+	case strings.Count(path, "/") == 4 && strings.HasPrefix(path, "/api/v2.0/projects/") && !strings.Contains(path, "/robots"):
+		handleProjectByID(w, r)
+
+	case strings.HasPrefix(path, "/api/v2.0/projects/") && strings.HasSuffix(path, "/robots"):
+		handleRobots(w, r)
+
+	case strings.Contains(path, "/robots/") && strings.Count(path, "/") == 6:
+		handleRobotByID(w, r)
+
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	}
+}
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	addr := fmt.Sprintf("0.0.0.0:%s", port)
+	log.Printf("Harbor mock API starting on %s", addr)
+	log.Fatal(http.ListenAndServe(addr, http.HandlerFunc(mux)))
+}
