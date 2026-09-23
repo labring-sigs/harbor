@@ -29,7 +29,7 @@ const (
 type HarborProjectReconciler struct {
 	client.Client
 	Scheme       *runtime.Scheme
-	HarborClient *harbor.Client
+	HarborClient HarborAPIClient
 	RegistryHost string // e.g. harbor.sealos.example.com
 }
 
@@ -301,11 +301,14 @@ func (r *HarborProjectReconciler) reconcileRefreshToken(ctx context.Context, pro
 		}
 	}
 
-	// 4. Update status
+	// 4. Update status via status subresource
 	project.Status.RobotName = newRobot.Name
 	project.Status.RobotID = newRobot.ID
+	if err := r.Status().Update(ctx, project); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update status after refresh: %w", err)
+	}
 
-	// Remove the refresh annotation
+	// Remove the refresh annotation from the main object
 	delete(project.Annotations, refreshAnnotation)
 	if err := r.Update(ctx, project); err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to remove refresh annotation: %w", err)
