@@ -1,7 +1,13 @@
 # Build the controller binary
 BINARY := manager
-IMAGE_TAG ?= latest
-IMAGE_REPO ?= ghcr.io/labring-sigs/harbor
+
+# ---------------------------------------------------------------------------
+# Image repository – derived from the Git remote so it works in any fork.
+# Override with:  make docker-build IMAGE_REPO=ghcr.io/myorg/myrepo
+# ---------------------------------------------------------------------------
+GIT_OWNER_REPO := $(shell git config --get remote.origin.url 2>/dev/null | sed -E 's|.*github\.com[:\/](.+)\.git|\1|')
+IMAGE_REPO     ?= ghcr.io/$(or $(GIT_OWNER_REPO),dinoallo/labring-sigs-harbor)
+IMAGE_TAG      ?= latest
 
 .PHONY: all build docker-build docker-push clean
 
