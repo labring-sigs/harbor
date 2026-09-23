@@ -25,13 +25,27 @@ harbor:
   # See charts/harbor/values.yaml for all available options.
   harbor:
     expose:
-      type: clusterIP
+      type: ingress
+      tls:
+        enabled: true
+        certSource: secret
+        secret:
+          secretName: ""
       clusterIP:
         name: harbor
         ports:
           httpPort: 80
           httpsPort: 443
-    externalURL: http://harbor:80
+      ingress:
+        hosts:
+          core: core.harbor.domain
+        annotations:
+          ingress.kubernetes.io/ssl-redirect: "true"
+          ingress.kubernetes.io/proxy-body-size: "0"
+          nginx.ingress.kubernetes.io/ssl-redirect: "true"
+          nginx.ingress.kubernetes.io/proxy-body-size: "0"
+
+    externalURL: https://core.harbor.domain
     portal:
       enabled: false
     trivy:
