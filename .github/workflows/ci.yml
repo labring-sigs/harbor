@@ -63,12 +63,33 @@ jobs:
 
       - name: Download envtest binaries
         run: |
+          set -euo pipefail
           mkdir -p /tmp/envtest-bin
-          source <(setup-envtest use 1.37.x -p env --bin-dir /tmp/envtest-bin)
-          echo "KUBEBUILDER_ASSETS=$KUBEBUILDER_ASSETS" >> $GITHUB_ENV
+
+          # Run setup-envtest and capture its stdout.
+          # If the command fails, the step exits immediately due to set -e.
+          ENVTEST_OUTPUT="$(setup-envtest use 1.37.x -p env --bin-dir /tmp/envtest-bin)"
+
+          # Source the captured output to set KUBEBUILDER_ASSETS
+          eval "$ENVTEST_OUTPUT"
+
+          # Verify the path was set
+          if [ -z "${KUBEBUILDER_ASSETS:-}" ]; then
+            echo "::error::setup-envtest did not set KUBEBUILDER_ASSETS"
+            echo "::group::setup-envtest stdout"
+            echo "$ENVTEST_OUTPUT"
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          echo "envtest binaries resolved to: $KUBEBUILDER_ASSETS"
+          ls -la "$KUBEBUILDER_ASSETS"
+          echo "KUBEBUILDER_ASSETS=$KUBEBUILDER_ASSETS" >> "$GITHUB_ENV"
 
       - name: Run integration tests
-        run: go test -v -count=1 ./controllers/...
+        run: |
+          echo "KUBEBUILDER_ASSETS=${KUBEBUILDER_ASSETS}"
+          go test -v -count=1 ./controllers/...
 
   ###########################################################################
   # Docker image – build & push (main branch only)
