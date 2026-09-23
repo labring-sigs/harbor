@@ -1,7 +1,7 @@
 # Build the controller binary
 BINARY := manager
 IMAGE_TAG ?= latest
-IMAGE_REPO ?= ghcr.io/dinoallo/labring-sigs-harbor
+IMAGE_REPO ?= ghcr.io/labring-sigs/harbor
 
 .PHONY: all build docker-build docker-push clean
 

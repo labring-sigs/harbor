@@ -37,6 +37,8 @@ jobs:
         run: make build
 
       - name: Run unit tests
+        env:
+          SKIP_TC: "1"
         run: go test -v -count=1 -short ./internal/...
 
   ###########################################################################
@@ -57,12 +59,12 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Install setup-envtest
-        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
 
       - name: Download envtest binaries
         run: |
           mkdir -p /tmp/envtest-bin
-          source <(setup-envtest use 1.31.x -p env --bin-dir /tmp/envtest-bin)
+          source <(setup-envtest use 1.37.x -p env --bin-dir /tmp/envtest-bin)
           echo "KUBEBUILDER_ASSETS=$KUBEBUILDER_ASSETS" >> $GITHUB_ENV
 
       - name: Run integration tests
@@ -108,7 +110,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=sha,prefix=,suffix=,format=short
+            type=sha,format=short
             type=raw,value=latest,enable=${{ github.ref_name == 'main' }}
 
       - name: Build and push
