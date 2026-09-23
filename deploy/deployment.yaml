@@ -20,7 +20,7 @@ spec:
       serviceAccountName: harbor-controller
       containers:
         - name: manager
-          image: ghcr.io/labring-sigs/harbor:latest
+          image: ghcr.io/dinoallo/labring-sigs-harbor:latest
           imagePullPolicy: IfNotPresent
           args:
             - --leader-elect
