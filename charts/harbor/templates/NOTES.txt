@@ -32,4 +32,7 @@ For production, consider:
    - Configuring an Ingress with a valid TLS certificate
    - Changing the default admin password
    - Setting up external database/redis for HA
+   - Using existingSecret for database and redis passwords:
+       database.external.existingSecret: <your-db-secret>
+       redis.external.existingSecret:    <your-redis-secret>
    - Adjusting persistence.size values

@@ -38,3 +38,17 @@ Generate the admin password secret name.
 {{- define "harbor-stack.adminPasswordSecret" -}}
 harbor-admin-password
 {{- end }}
+
+{{/*
+Database password secret name.
+*/}}
+{{- define "harbor-stack.databasePasswordSecret" -}}
+{{- printf "%s-database-password" (include "harbor-stack.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Redis password secret name.
+*/}}
+{{- define "harbor-stack.redisPasswordSecret" -}}
+{{- printf "%s-redis-password" (include "harbor-stack.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}

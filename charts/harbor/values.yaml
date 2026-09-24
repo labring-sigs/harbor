@@ -160,6 +160,12 @@ harbor:
       image:
         repository: docker.io/goharbor/harbor-db
         tag: v2.15.2
+    external:
+      # Reference an existing Kubernetes Secret for the database password.
+      # The secret must contain the key specified in `existingSecretKey`.
+      # When set, the plaintext `password` field is ignored.
+      # existingSecret: ""
+      # existingSecretKey: "POSTGRES_PASSWORD"
 
   # ---- Redis ----
   redis:
@@ -168,6 +174,12 @@ harbor:
       image:
         repository: docker.io/goharbor/valkey-photon
         tag: v2.15.2
+    external:
+      # Reference an existing Kubernetes Secret for the redis password.
+      # The secret must contain the key specified in `existingSecretKey`.
+      # When set, the plaintext `password` field is ignored.
+      # existingSecret: ""
+      # existingSecretKey: "REDIS_PASSWORD"
 
   # ---- Resource sizing (adjust as needed for your cluster) ----
   # resources:

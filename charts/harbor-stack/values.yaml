@@ -20,6 +20,17 @@ harbor:
   # Must match harbor.harborAdminPassword in the harbor subchart values.
   adminPassword: "Harbor12345"
 
+  # --- External database password (plaintext fallback) ---
+  # If set and no existingSecret is provided under
+  # harbor.harbor.database.external, the chart will automatically create a
+  # Kubernetes Secret named "<release>-database-password".
+  # Recommended: use existingSecret directly instead.
+  databasePassword: ""
+
+  # --- External redis password (plaintext fallback) ---
+  # Same pattern as databasePassword above.
+  redisPassword: ""
+
   # These values are forwarded to the harbor subchart,
   # which in turn forwards them to the official harbor-helm subchart.
   # See charts/harbor/values.yaml for all available options.
@@ -82,8 +93,17 @@ harbor:
       #       rootdirectory: /registry
     database:
       type: internal
+      external:
+        # Reference an existing Kubernetes Secret for the database password.
+        # The secret key defaults to POSTGRES_PASSWORD.
+        existingSecret: ""
+        existingSecretKey: "POSTGRES_PASSWORD"
     redis:
       type: internal
+      external:
+        # Reference an existing Kubernetes Secret for the redis password.
+        existingSecret: ""
+        existingSecretKey: "REDIS_PASSWORD"
 
 # ── Harbor Controller ──────────────────────────────────────────────────────
 harbor-controller:

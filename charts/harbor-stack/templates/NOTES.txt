@@ -13,6 +13,15 @@ Change it before installing or update it after deploy:
 
   helm upgrade --set harbor.adminPassword=<your-password>
 
+If you set .Values.harbor.databasePassword or .Values.harbor.redisPassword
+(plaintext), the chart will automatically create corresponding
+Kubernetes Secrets.  The official harbor-helm chart will reference
+those Secrets via the existingSecret field instead of plaintext.
+
+For production, pre-create your own Secrets and reference them via:
+  --set harbor.harbor.database.external.existingSecret=<your-secret>
+  --set harbor.harbor.redis.external.existingSecret=<your-secret>
+
 1. Wait for Harbor to become ready:
 
    kubectl -n {{ .Release.Namespace }} get pods \
