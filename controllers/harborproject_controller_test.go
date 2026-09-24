@@ -655,6 +655,59 @@ func TestReconcile_UpdatePublicAutoScan_NoRobotRotation(t *testing.T) {
 }
 
 
+
+
+func TestReconcile_UpdatePublicAutoScan_NotReadyStillRotates(t *testing.T) {
+	// If project is not Ready (e.g. recovering from a failed secret distribution),
+	// the controller should still perform full reconciliation (including robot creation)
+	// even if RobotID > 0.
+	project := fakeProject("meta-sync-recover", string(v1.HarborPhaseFailed), true)
+	project.Generation = 2
+	project.Status.HarborProjectID = 77
+	project.Status.HarborProjectName = "hp-meta-sync-recover"
+	project.Status.RobotID = 88       // has a robot from a previous attempt
+	project.Status.ObservedGeneration = 0 // stale, force reconcile
+	project.Spec.Public = true
+	project.Spec.AutoScan = true
+
+	createRobotCalled := false
+
+	mock := &mockHarborClient{
+		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
+			return &harbor.Project{ProjectID: 77, Name: "hp-meta-sync-recover"}, nil
+		},
+		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			return nil
+		},
+		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
+			createRobotCalled = true
+			return &harbor.RobotAccount{ID: 99, Name: "robot-new", Token: "tok"}, nil
+		},
+		deleteProjectRobotFn: func(_ context.Context, projectID int64, robotID int64) error {
+			return nil
+		},
+	}
+
+	r := newTestReconciler(mock, project)
+
+	// Add finalizer so the reconciler doesn't stop at the finalizer step
+	project.Finalizers = []string{harborFinalizer}
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "meta-sync-recover"}}
+
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Requeue {
+		t.Fatal("did not expect requeue")
+	}
+
+	if !createRobotCalled {
+		t.Error("expected CreateRobot to be called when project is not Ready (recovery flow)")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helper tests
 // ---------------------------------------------------------------------------

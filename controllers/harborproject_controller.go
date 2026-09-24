@@ -85,6 +85,8 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 		return ctrl.Result{}, nil
 	}
 
+	// Capture whether the project was Ready before we modify the phase below.
+	wasReady := project.Status.Phase == v1.HarborPhaseReady
 	// Set phase to Creating
 	project.Status.Phase = v1.HarborPhaseCreating
 	if err := r.Status().Update(ctx, project); err != nil {
@@ -139,7 +141,7 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 
 		// If we already have a robot account, skip robot/secret recreation.
 		// The Harbor project metadata (public/autoScan/storageLimit) has already been synced.
-		if project.Status.RobotID > 0 {
+		if wasReady && project.Status.RobotID > 0 {
 			project.Status.Phase = v1.HarborPhaseReady
 			project.Status.ObservedGeneration = project.Generation
 			logger.Info("HarborProject metadata synced to Harbor",
