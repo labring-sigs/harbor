@@ -178,6 +178,9 @@ spec:
               robotName:
                 description: Name of the robot account
                 type: string
+              lastSpecHash:
+                description: Hash of namespaceRefs and robotPermissions from the last successful full reconciliation
+                type: string
             type: object
         type: object
     additionalPrinterColumns:

@@ -592,7 +592,7 @@ func TestReconcile_UpdatePublicAutoScan_NoRobotRotation(t *testing.T) {
 	project.Status.HarborProjectName = "hp-meta-sync"
 	project.Status.RobotID = 88       // already has a robot
 	project.Status.ObservedGeneration = 0 // stale, force reconcile
-	project.Status.LastSpecHash = "5f61356aec8fca4f" // matches default namespaceRefs+robotPermissions from fakeProject
+	project.Status.LastSpecHash = "83110ed3b28e79ff" // matches default namespaceRefs+robotPermissions from fakeProject
 	project.Spec.Public = true
 	project.Spec.AutoScan = true
 
