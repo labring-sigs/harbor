@@ -91,6 +91,8 @@ jobs:
           echo "KUBEBUILDER_ASSETS=$KUBEBUILDER_ASSETS" >> "$GITHUB_ENV"
 
       - name: Run integration tests
+        env:
+          SKIP_E2E: "1"
         run: |
           echo "KUBEBUILDER_ASSETS=${KUBEBUILDER_ASSETS}"
           go test -v -count=1 ./controllers/...

@@ -39,7 +39,7 @@ test:
 
 # Run integration tests with envtest (requires KUBEBUILDER_ASSETS)
 test-integration:
-	go test -v -count=1 ./controllers/...
+	SKIP_E2E=1 go test -v -count=1 ./controllers/...
 
 # Run e2e tests (requires Docker daemon + KUBEBUILDER_ASSETS)
 # E2E tests spin up a Testcontainers container with a mock Harbor server

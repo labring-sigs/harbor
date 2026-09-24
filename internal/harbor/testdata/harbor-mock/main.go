@@ -481,12 +481,32 @@ func handleV2Catalog(w http.ResponseWriter, r *http.Request) {
 func mux(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%s %s", r.Method, r.URL.Path)
 
-	// BasicAuth enforcement (matches the test client credentials)
+	// Authentication: Harbor management API requires admin credentials;
+	// OCI Distribution API accepts admin credentials or valid robot credentials.
 	user, pass, ok := r.BasicAuth()
-	if !ok || user != "admin" || pass != "harbor12345" {
+	isAdmin := ok && user == "admin" && pass == "harbor12345"
+	isOCI := strings.HasPrefix(r.URL.Path, "/v2/") || r.URL.Path == "/v2"
+
+	if !ok {
 		w.Header().Set("WWW-Authenticate", `Basic realm="Harbor"`)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
+	}
+
+	if !isAdmin {
+		if isOCI {
+			// For OCI endpoints, check if the credentials match any robot account
+			if !isValidRobotCredential(user, pass) {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Harbor"`)
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+				return
+			}
+		} else {
+			// Harbor management API requires admin credentials
+			w.Header().Set("WWW-Authenticate", `Basic realm="Harbor"`)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
 	}
 
 	path := r.URL.Path
@@ -549,6 +569,23 @@ func mux(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
+}
+
+
+// isValidRobotCredential checks if the given username/password matches any
+// robot account stored in the global store.
+func isValidRobotCredential(username, password string) bool {
+	globalStore.mu.Lock()
+	defer globalStore.mu.Unlock()
+
+	for _, robots := range globalStore.robots {
+		for _, robot := range robots {
+			if robot.Name == username && robot.Secret == password {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func main() {
