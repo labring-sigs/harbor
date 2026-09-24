@@ -554,3 +554,36 @@ func TestSetCondition_NilList(t *testing.T) {
 	// Should not panic
 	setCondition(nil, "Ready", metav1.ConditionTrue, "Reason", "Message")
 }
+
+func TestShortID(t *testing.T) {
+	prefix := "test-prefix"
+	result := shortID(prefix)
+
+	// Should start with prefix
+	if len(result) <= len(prefix)+1 {
+		t.Errorf("expected result to be longer than prefix+separator, got %q", result)
+	}
+	if result[:len(prefix)] != prefix {
+		t.Errorf("expected result to start with %q, got %q", prefix, result)
+	}
+	if result[len(prefix):len(prefix)+1] != "-" {
+		t.Errorf("expected separator '-', got %q", result[len(prefix):len(prefix)+1])
+	}
+
+	// The suffix should be lowercase hex (a-f, 0-9)
+	suffix := result[len(prefix)+1:]
+	if len(suffix) != 8 {
+		t.Errorf("expected 8-char hex suffix, got %d chars: %q", len(suffix), suffix)
+	}
+	for _, c := range suffix {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			t.Errorf("expected hex character, got %q in suffix %q", c, suffix)
+		}
+	}
+
+	// Verify randomness: two calls should produce different results
+	result2 := shortID(prefix)
+	if result == result2 {
+		t.Error("expected two calls to shortID to produce different results")
+	}
+}

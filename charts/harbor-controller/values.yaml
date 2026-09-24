@@ -132,4 +132,3 @@ service:
 # Leader election
 leaderElection:
   enabled: true
-  id: "harbor.sealos.io"
