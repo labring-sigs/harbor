@@ -827,6 +827,66 @@ subjects:
   name: harbor-controller
   namespace: harbor-system
 ```
+### 4.8 Project Auto-Provision（可选控制器）
+
+`ProjectAutoProvision` 是一个**可选**控制器，监听 Namespace 的创建/更新事件，自动为带有指定 owner 标签的 Namespace 创建对应的 `HarborProject` CR，实现"Namespace 创建即自带镜像仓库"的自动化体验。
+
+#### 启用方式
+
+在 controller 启动时传入 `--enable-project-auto-provision` 标志：
+
+```bash
+manager --enable-project-auto-provision --owner-label-key="user.sealos.io/owner"
+```
+
+#### 工作原理
+
+```
+┌─────────────────┐     ┌──────────────────────────────┐     ┌──────────────────────┐
+│  Namespace 变化   │     │  ProjectAutoProvision         │     │  HarborProject        │
+│                  │     │  Reconciler                    │     │  Reconciler           │
+│  创建/更新        │────▶│                               │────▶│  (标准创建流程)        │
+│  label 变更       │     │  1. 读取 Namespace            │     │                      │
+│                  │     │  2. 检查 owner 标签             │     │  创建 Project         │
+│                  │     │  3. 创建/更新 HarborProject CR  │     │  创建 Robot           │
+│                  │     │  4. 标签管理（记录 NS UID）      │     │  分发 Secret          │
+└─────────────────┘     └──────────────────────────────┘     └──────────────────────┘
+```
+
+1. 用户创建 Namespace，并打上 owner 标签（如 `user.sealos.io/owner: user-abc`）
+2. `ProjectAutoProvision` 检测到标签变更，生成对应的 `HarborProject` CR（名称格式 `hp-{namespace}`）
+3. `HarborProjectReconciler` 接管，执行标准的 Project/ Robot/ Secret 创建流程
+
+#### 标签约定
+
+自动创建的 `HarborProject` CR 上会附加以下标签，用于区分自动创建与手动创建的资源：
+
+| 标签 | 说明 |
+|------|------|
+| `harbor.sealos.io/auto-provision` | 标记为自动创建，值为 `"true"` |
+| `harbor.sealos.io/source-namespace` | 来源 Namespace 名称 |
+| `harbor.sealos.io/source-namespace-uid` | 来源 Namespace 的 UID，用于检测重建 |
+
+#### Namespace 重建检测
+
+如果 Namespace 被删除后重建（同名但不同 UID），控制器通过 `source-namespace-uid` 标签检测到 UID 变化，会重新匹配并更新 `HarborProject` 的 spec，确保新 Namespace 被正确采纳。
+
+#### 默认配置
+
+自动创建的 `HarborProject` 使用以下默认值：
+
+- **ProjectName**: Namespace 名称（短名称，非 `hp-` 前缀）
+- **StorageLimit**: 5 GB
+- **Public**: false
+- **AutoScan**: false
+- **RobotPermissions**: push + pull
+- **NamespaceRefs**: 仅包含来源 Namespace 自身
+
+#### 与手动创建的关系
+
+- 如果某个 `HarborProject` 已经被手动创建，`ProjectAutoProvision` 发现同名 CR 存在时不会重复创建，而是会**采纳**该 CR：将其 spec 更新为匹配当前 Namespace 的标签配置，并补全自动创建标签
+- 删除自动创建的 `HarborProject` CR 后，`ProjectAutoProvision` 不会自动重建（除非手动删除后重新触发 Namespace 变更事件）
+- 移除 Namespace 上的 owner 标签**不会**触发删除已有 CR——这是有意设计，避免误删
 
 ---
 
@@ -1092,12 +1152,13 @@ harbor_controller_operation_total{operation="create_project", status="success"}
 ### Phase 1: Basic Integration
 
 - [ ] Harbor Helm Chart 部署（配置 db_auth + S3 存储）
-- [ ] CRD 定义 + 代码生成（HarborProject CRD，deepcopy）
-- [ ] Harbor Admin Client（`internal/harbor/client.go`）
-- [ ] Reconciler 核心逻辑（创建 Project → Robot → 遍历 namespaceRefs 分发 Secret；删除时反向清理）
+- [x] CRD 定义 + 代码生成（HarborProject CRD，deepcopy）
+- [x] Harbor Admin Client（`internal/harbor/client.go`）
+- [x] Reconciler 核心逻辑（创建 Project → Robot → 遍历 namespaceRefs 分发 Secret；删除时反向清理）
 - [x] Robot Token 刷新：通过 `harbor.sealos.io/refresh-token` 注解触发（创建新 → 更新 Secret → 删除旧）
-- [ ] RBAC + 部署配置（ServiceAccount、ClusterRole、Deployment）
+- [x] RBAC + 部署配置（ServiceAccount、ClusterRole、Deployment）
 - [ ] 端到端测试（创建→推送→拉取→删除全流程）
+- [x] Project Auto-Provision 控制器（Namespace 自动创建 HarborProject CR）
 
 ### Phase 2: Metering & Billing
 
