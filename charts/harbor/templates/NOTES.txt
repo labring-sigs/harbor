@@ -5,9 +5,10 @@ Components disabled: Portal · Trivy · Notary · ChartMuseum · Exporter
 
 The chart automatically creates the admin password Secret
 from a randomly generated password (16-character alphanumeric).
-You can set a custom password before installing:
+Set a custom password during initial install:
 
-  helm upgrade --set harbor.harborAdminPassword=<your-password>
+  helm install harbor ./charts/harbor \
+    --set harbor.harborAdminPassword=<your-password>
 
 1. Verify Harbor is reachable:
 

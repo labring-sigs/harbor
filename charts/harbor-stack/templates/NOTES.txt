@@ -9,9 +9,15 @@ Bundled Harbor (minimal):
 
 The chart automatically creates the shared admin password Secret
 from .Values.harbor.adminPassword (randomly generated if empty).
-You can also set a custom password before installing or update it after deploy:
+Set a custom password during initial install:
 
-  helm upgrade --set harbor.adminPassword=<your-password>
+  helm install harbor-stack ./charts/harbor-stack \
+    --set harbor.enabled=true \
+    --set harbor.adminPassword=<your-password>
+
+To change the admin password after deployment, use Harbor's
+password-change API or UI first, then update the controller
+Secret and restart the controller pod.
 
 1. Wait for Harbor to become ready:
 
