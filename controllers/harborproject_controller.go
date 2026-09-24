@@ -125,6 +125,7 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 	} else {
 		// Update existing project properties to match spec
 		if err := r.HarborClient.UpdateProject(ctx, hbProject.ProjectID, harbor.ProjectSpec{
+			Name:         projectName,
 			Public:       project.Spec.Public,
 			StorageLimit: project.Spec.StorageLimit,
 			AutoScan:     project.Spec.AutoScan,

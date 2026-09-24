@@ -560,6 +560,9 @@ func TestReconcile_UpdateProjectProperties(t *testing.T) {
 	if capturedSpec.AutoScan != true {
 		t.Errorf("expected AutoScan=true, got %v", capturedSpec.AutoScan)
 	}
+	if capturedSpec.Name != "hp-update-test" {
+		t.Errorf("expected Name=\"hp-update-test\", got %q", capturedSpec.Name)
+	}
 	if capturedSpec.StorageLimit != 100*1024*1024*1024 {
 		t.Errorf("expected StorageLimit=107374182400, got %d", capturedSpec.StorageLimit)
 	}

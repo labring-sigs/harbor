@@ -110,6 +110,7 @@ func (c *Client) DeleteProject(ctx context.Context, projectID int64) error {
 // UpdateProject updates an existing Harbor project's properties (public, auto_scan, storage_limit)
 func (c *Client) UpdateProject(ctx context.Context, projectID int64, spec ProjectSpec) error {
 	body := map[string]interface{}{
+		"project_name":  spec.Name,
 		"storage_limit": spec.StorageLimit,
 		"metadata": map[string]interface{}{
 			"public":    strconv.FormatBool(spec.Public),

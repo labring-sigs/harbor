@@ -222,6 +222,79 @@ func TestDeleteProject_NotFound(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// UpdateProject tests
+// ---------------------------------------------------------------------------
+
+func TestUpdateProject_Success(t *testing.T) {
+	client := newMockClient(func(req *http.Request) (int, string) {
+		if req.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", req.Method)
+		}
+		if req.URL.Path != "/api/v2.0/projects/42" {
+			t.Errorf("expected /api/v2.0/projects/42, got %s", req.URL.Path)
+		}
+
+		// Verify auth
+		user, pass, ok := req.BasicAuth()
+		if !ok || user != "admin" || pass != "harbor12345" {
+			t.Errorf("unexpected auth: user=%q, pass=%q", user, pass)
+		}
+
+		// Verify body
+		bodyBytes, _ := io.ReadAll(req.Body)
+		var body map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &body); err != nil {
+			t.Fatal(err)
+		}
+		if body["project_name"] != "test-project" {
+			t.Errorf("expected project_name 'test-project', got %v", body["project_name"])
+		}
+		if body["storage_limit"] != float64(-1) {
+			t.Errorf("expected storage_limit -1, got %v", body["storage_limit"])
+		}
+		metadata, ok := body["metadata"].(map[string]interface{})
+		if !ok {
+			t.Fatal("expected metadata map")
+		}
+		if metadata["public"] != "true" {
+			t.Errorf("expected public 'true', got %v", metadata["public"])
+		}
+		if metadata["auto_scan"] != "false" {
+			t.Errorf("expected auto_scan 'false', got %v", metadata["auto_scan"])
+		}
+		return http.StatusOK, ""
+	})
+
+	err := client.UpdateProject(context.Background(), 42, ProjectSpec{
+		Name:         "test-project",
+		Public:       true,
+		StorageLimit: -1,
+		AutoScan:     false,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestUpdateProject_APIError(t *testing.T) {
+	client := newMockClient(func(req *http.Request) (int, string) {
+		return http.StatusNotFound, `{"errors":[{"code":"NOT_FOUND","message":"project not found"}]}`
+	})
+
+	err := client.UpdateProject(context.Background(), 999, ProjectSpec{Name: "nonexistent"})
+	if err == nil {
+		t.Fatal("expected error for not found")
+	}
+	apiErr, ok := err.(*ErrAPIError)
+	if !ok {
+		t.Fatalf("expected ErrAPIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", apiErr.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Robot Account API tests
 // ---------------------------------------------------------------------------
 
