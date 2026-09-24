@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -494,13 +495,35 @@ func TestE2E_HarborProjectLifecycle(t *testing.T) {
 
 	// Build a minimal OCI image
 	// 1. Config blob
+	// Create a minimal OCI image with a valid tar layer
+	// 1. Config blob with proper rootfs diff ID
+	var layerBuf bytes.Buffer
+	tarWriter := tar.NewWriter(&layerBuf)
+	if err := tarWriter.WriteHeader(&tar.Header{
+		Name:     "hello.txt",
+		Size:     int64(len("Hello, Harbor E2E!\n")),
+		Mode:     0644,
+		ModTime:  time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("failed to write tar header: %v", err)
+	}
+	if _, err := tarWriter.Write([]byte("Hello, Harbor E2E!\n")); err != nil {
+		t.Fatalf("failed to write tar content: %v", err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatalf("failed to close tar: %v", err)
+	}
+
+	layerDigestHex := fmt.Sprintf("%x", sha256.Sum256(layerBuf.Bytes()))
+	layerDigest := "sha256:" + layerDigestHex
+
 	config := map[string]interface{}{
-		"created": "2024-01-01T00:00:00Z",
+		"created":      "2024-01-01T00:00:00Z",
 		"architecture": "amd64",
-		"os": "linux",
+		"os":           "linux",
 		"rootfs": map[string]interface{}{
-			"type": "layers",
-			"diff_ids": []string{},
+			"type":     "layers",
+			"diff_ids": []string{layerDigest},
 		},
 		"config": map[string]interface{}{},
 	}
@@ -511,13 +534,15 @@ func TestE2E_HarborProjectLifecycle(t *testing.T) {
 	}
 	t.Logf("Config blob digest: %s (%d bytes)", configDigest, len(configData))
 
-	// 2. Layer blob (empty tar-like layer for a minimal image)
-	layerData := []byte("Hello, Harbor E2E test! This is a test layer content.\n")
-	layerDigest, err := ociRobot.uploadBlob(envCtx, projectName+"/my-image", layerData)
+	// 2. Layer blob (valid OCI tar layer)
+	layerDigest2, err := ociRobot.uploadBlob(envCtx, projectName+"/my-image", layerBuf.Bytes())
 	if err != nil {
 		t.Fatalf("failed to upload layer blob: %v", err)
 	}
-	t.Logf("Layer blob digest: %s (%d bytes)", layerDigest, len(layerData))
+	if layerDigest2 != layerDigest {
+		t.Fatalf("layer digest mismatch: got %q, expected %q", layerDigest2, layerDigest)
+	}
+	t.Logf("Layer blob digest: %s (%d bytes)", layerDigest2, len(layerBuf.Bytes()))
 
 	// 3. Manifest (OCI image manifest)
 	manifest := map[string]interface{}{
@@ -532,7 +557,7 @@ func TestE2E_HarborProjectLifecycle(t *testing.T) {
 			{
 				"mediaType": "application/vnd.oci.image.layer.v1.tar",
 				"digest":    layerDigest,
-				"size":      len(layerData),
+				"size":      len(layerBuf.Bytes()),
 			},
 		},
 	}
@@ -575,10 +600,10 @@ func TestE2E_HarborProjectLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to pull layer blob: %v", err)
 	}
-	if string(pulledLayer) != string(layerData) {
+	if string(pulledLayer) != string(layerBuf.Bytes()) {
 		t.Errorf("pulled layer differs from pushed layer")
 	}
-	t.Logf("Layer blob verified: %d bytes -> %q", len(pulledLayer), string(pulledLayer))
+	t.Logf("Layer blob verified: %d bytes", len(pulledLayer))
 
 	// ---- Step 8: Delete the HarborProject CR ----
 	t.Log("=== Step 8: Deleting HarborProject CR ===")
@@ -615,8 +640,35 @@ func TestE2E_HarborProjectLifecycle(t *testing.T) {
 		t.Log("Finalizer removed, CR will be garbage collected")
 	}
 
-	// Verify the OCI image artifacts are still present (the mock doesn't delete them
-	// on project deletion since it's a simplified mock; real Harbor would clean up).
+	// Check that the dockerconfigjson Secret was deleted
+	secretCheck := &corev1.Secret{}
+	if err := kubeClient.Get(envCtx, types.NamespacedName{
+		Name:      "harbor-registry-cred-e2e-test-project",
+		Namespace: "ns-e2e-test",
+	}, secretCheck); err == nil {
+		t.Errorf("expected dockerconfigjson Secret to be deleted after CR removal, but it still exists")
+	} else {
+		t.Logf("dockerconfigjson Secret deleted as expected: %v", err)
+	}
+
+	// Verify the OCI image artifacts were cleaned up by the mock (project cascade)
+	ociAdmin := newOCIClient(mockEndpoint, "admin", "harbor12345")
+	if _, _, err := ociAdmin.pullManifest(envCtx, projectName+"/my-image", "latest"); err == nil {
+		t.Errorf("expected manifest to be deleted after project removal, but pull succeeded")
+	} else {
+		t.Logf("Manifest correctly deleted: %v", err)
+	}
+	if _, err := ociAdmin.pullBlob(envCtx, projectName+"/my-image", configDigest); err == nil {
+		t.Errorf("expected config blob to be deleted after project removal, but pull succeeded")
+	} else {
+		t.Logf("Config blob correctly deleted: %v", err)
+	}
+	if _, err := ociAdmin.pullBlob(envCtx, projectName+"/my-image", layerDigest); err == nil {
+		t.Errorf("expected layer blob to be deleted after project removal, but pull succeeded")
+	} else {
+		t.Logf("Layer blob correctly deleted: %v", err)
+	}
+
 	t.Log("E2E test completed successfully!")
 }
 

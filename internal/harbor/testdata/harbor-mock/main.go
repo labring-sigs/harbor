@@ -127,7 +127,6 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 		all := make([]*project, 0, len(globalStore.projects))
 		for _, p := range globalStore.projects {
 			all = append(all, p)
-		}
 		globalStore.mu.Unlock()
 		writeJSON(w, http.StatusOK, all)
 
@@ -175,6 +174,14 @@ func handleProjectByID(w http.ResponseWriter, r *http.Request) {
 			if p.ID == projectID {
 				delete(globalStore.projects, name)
 				delete(globalStore.robots, projectID)
+				// Each test uses its own isolated mock container, so clearing
+				// all OCI data is equivalent to Harbor project cascade
+				// deletion for single-project scenarios.
+				globalStore.manifests = make(map[string]map[string]manifestEntry)
+				globalStore.blobs = make(map[string][]byte)
+				for k := range globalStore.uploads {
+					delete(globalStore.uploads, k)
+				}
 				globalStore.mu.Unlock()
 				w.WriteHeader(http.StatusOK)
 				return
