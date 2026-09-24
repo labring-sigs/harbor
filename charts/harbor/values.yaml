@@ -127,12 +127,15 @@ harbor:
     #     # Use an existing secret (recommended) instead of plaintext keys.
     #     # Keys: REGISTRY_STORAGE_S3_ACCESSKEY, REGISTRY_STORAGE_S3_SECRETKEY
     #     # existingSecret: "harbor-s3-credentials"
+    #     # Inline credentials (alternative to existingSecret; not recommended for production):
+    #     # accesskey: "minioadmin"
+    #     # secretkey: "minioadmin"
     #     region: us-east-1
     #     bucket: harbor-registry
     #     # S3-compatible endpoint (required for MinIO; omit for AWS S3).
     #     regionendpoint: http://minio.minio.svc:9000
     #     # Set to false when using HTTP endpoints (MinIO without TLS).
-    #     secure: true
+    #     secure: false
     #     # Enable AWS Signature v4 (required for most S3-compatible backends).
     #     v4auth: true
     #     # Root directory within the bucket (optional).

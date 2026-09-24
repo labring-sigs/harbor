@@ -77,7 +77,7 @@ harbor:
       #       region: us-east-1
       #       bucket: harbor-registry
       #       regionendpoint: http://minio.minio.svc:9000
-      #       secure: true
+      #       secure: false
       #       v4auth: true
       #       rootdirectory: /registry
     database:
