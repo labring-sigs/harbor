@@ -59,6 +59,27 @@ harbor:
       enabled: false
     persistence:
       enabled: true
+      # ---- Registry image/chart storage backend ----
+      # To use S3-compatible storage (e.g., MinIO) for the bundled deployment,
+      # uncomment and customize the imageChartStorage section below.
+      #
+      # The S3 credentials must be supplied via a Kubernetes secret.
+      # Required secret keys:
+      #   REGISTRY_STORAGE_S3_ACCESSKEY
+      #   REGISTRY_STORAGE_S3_SECRETKEY
+      #
+      # Example:
+      #   imageChartStorage:
+      #     disableredirect: true
+      #     type: s3
+      #     s3:
+      #       existingSecret: "harbor-s3-credentials"
+      #       region: us-east-1
+      #       bucket: harbor-registry
+      #       regionendpoint: http://minio.minio.svc:9000
+      #       secure: true
+      #       v4auth: true
+      #       rootdirectory: /registry
     database:
       type: internal
     redis:

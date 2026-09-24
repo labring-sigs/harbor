@@ -74,6 +74,29 @@ harbor:
   # redis:         (kept)
 
   # ---- Persistence ----
+  # Harbor supports multiple storage backends for the image/chart registry.
+  # For production deployments, especially in Sealos Cloud, we recommend
+  # using S3-compatible storage (e.g., MinIO) instead of PVCs.
+  #
+  # To configure S3 storage, uncomment and customize the `imageChartStorage`
+  # section below.  Credentials can be supplied via a Kubernetes secret
+  # referenced by `existingSecret` (recommended) or inline with
+  # `accesskey` / `secretkey`.
+  #
+  # Required secret keys when using `existingSecret`:
+  #   REGISTRY_STORAGE_S3_ACCESSKEY
+  #   REGISTRY_STORAGE_S3_SECRETKEY
+  #
+  # Example MinIO/S3 secret:
+  #   apiVersion: v1
+  #   kind: Secret
+  #   metadata:
+  #     name: harbor-s3-credentials
+  #   type: Opaque
+  #   data:
+  #     REGISTRY_STORAGE_S3_ACCESSKEY: <base64-access-key>
+  #     REGISTRY_STORAGE_S3_SECRETKEY: <base64-secret-key>
+  # ---
   persistence:
     enabled: true
     # persistentVolumeClaim:
@@ -89,6 +112,43 @@ harbor:
     #   redis:
     #     storageClass: ""
     #     size: 5Gi
+    # ---- Registry image/chart storage backend ----
+    # Uncomment and set `type: s3` to use S3-compatible storage (MinIO, etc.).
+    # When `type` is `filesystem` (default) the PVC block above applies.
+    # imageChartStorage:
+    #   # Disable HTTP redirect for backends that don't support it (e.g. MinIO).
+    #   # See https://github.com/distribution/distribution/blob/release/2.8/docs/configuration.md#redirect
+    #   disableredirect: true
+    #   # Storage type: "filesystem", "azure", "gcs", "s3", "swift", "oss"
+    #   type: s3
+    #   filesystem:
+    #     rootdirectory: /storage
+    #   s3:
+    #     # Use an existing secret (recommended) instead of plaintext keys.
+    #     # Keys: REGISTRY_STORAGE_S3_ACCESSKEY, REGISTRY_STORAGE_S3_SECRETKEY
+    #     # existingSecret: "harbor-s3-credentials"
+    #     region: us-east-1
+    #     bucket: harbor-registry
+    #     # S3-compatible endpoint (required for MinIO; omit for AWS S3).
+    #     regionendpoint: http://minio.minio.svc:9000
+    #     # Set to false when using HTTP endpoints (MinIO without TLS).
+    #     secure: true
+    #     # Enable AWS Signature v4 (required for most S3-compatible backends).
+    #     v4auth: true
+    #     # Root directory within the bucket (optional).
+    #     # rootdirectory: /registry
+    #     # Encryption settings (optional).
+    #     # encrypt: false
+    #     # keyid: mykeyid
+    #     # Skip TLS certificate verification (not recommended for production).
+    #     # skipverify: false
+    #     # S3 storage class (optional).
+    #     # storageclass: STANDARD
+    #     # Multipart upload settings (optional).
+    #     # chunksize: "5242880"
+    #     # multipartcopychunksize: "33554432"
+    #     # multipartcopymaxconcurrency: 100
+    #     # multipartcopythresholdsize: "33554432"
 
   # ---- Database ----
   database:
