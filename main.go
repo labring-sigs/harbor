@@ -41,6 +41,7 @@ func main() {
 	var enableProjectAutoProvision bool
 	var ownerLabelKey string
 	var defaultStorageLimit int64
+	var rotationStateNamespace string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -53,6 +54,8 @@ func main() {
 		"Label key on namespaces used to determine the owner for auto-provisioned HarborProject CRs.")
 	flag.Int64Var(&defaultStorageLimit, "default-storage-limit", defaultStorageLimitFlagDefault,
 		"Default storage limit in bytes for auto-provisioned HarborProjects. Use -1 for unlimited.")
+	flag.StringVar(&rotationStateNamespace, "rotation-state-namespace", "",
+		"Namespace where rotation-pending Secrets are stored. If empty, retry-safe rotation is disabled.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -96,6 +99,7 @@ func main() {
 		Scheme:       mgr.GetScheme(),
 		HarborClient: harborClient,
 		RegistryHost: registryHost,
+		RotationStateNamespace: rotationStateNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "HarborProject")
 		os.Exit(1)

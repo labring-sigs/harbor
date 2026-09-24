@@ -127,6 +127,7 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 		all := make([]*project, 0, len(globalStore.projects))
 		for _, p := range globalStore.projects {
 			all = append(all, p)
+		}
 		globalStore.mu.Unlock()
 		writeJSON(w, http.StatusOK, all)
 
@@ -277,12 +278,8 @@ func handleRobots(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleRobotByID handles DELETE and PATCH /api/v2.0/robots/<robotID>
 func handleRobotByID(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-		return
-	}
-
 	robotID, ok := parseID(r.URL.Path)
 	if !ok || robotID == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid robot ID"})
@@ -292,16 +289,54 @@ func handleRobotByID(w http.ResponseWriter, r *http.Request) {
 	globalStore.mu.Lock()
 	defer globalStore.mu.Unlock()
 
-	for projectID, robots := range globalStore.robots {
-		for i, rbt := range robots {
+	// Search across all projects for the robot
+	var foundRobot *robotAccount
+	var foundProjectID int64
+	for pid, robots := range globalStore.robots {
+		for _, rbt := range robots {
 			if rbt.ID == robotID {
-				globalStore.robots[projectID] = append(robots[:i], robots[i+1:]...)
-				w.WriteHeader(http.StatusOK)
-				return
+				foundRobot = rbt
+				foundProjectID = pid
+				break
 			}
 		}
+		if foundRobot != nil {
+			break
+		}
 	}
-	writeJSON(w, http.StatusNotFound, map[string]string{"error": "robot not found"})
+
+	if foundRobot == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "robot not found"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodDelete:
+		// Remove the robot from the slice
+		robots := globalStore.robots[foundProjectID]
+		for i, rbt := range robots {
+			if rbt.ID == robotID {
+				globalStore.robots[foundProjectID] = append(robots[:i], robots[i+1:]...)
+				break
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+
+	case http.MethodPatch:
+		// Refresh the robot secret (in-place update)
+		var req struct {
+			Secret string `json:"secret"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+			return
+		}
+		foundRobot.Secret = req.Secret
+		writeJSON(w, http.StatusOK, foundRobot)
+
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
 }
 
 // ---------------------------------------------------------------------------

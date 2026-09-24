@@ -179,6 +179,10 @@ func (m *mockIntegrationHarborClient) DeleteProjectRobot(_ context.Context, proj
 	return nil
 }
 
+func (m *mockIntegrationHarborClient) RefreshRobotSecret(_ context.Context, robotID int64, secret string) error {
+	return nil
+}
+
 func (m *mockIntegrationHarborClient) DeleteProject(_ context.Context, projectID int64) error {
 	if m.projects == nil {
 		return nil
@@ -380,7 +384,7 @@ func TestIntegration_CRD_TokenRefresh(t *testing.T) {
 		t.Errorf("expected refresh annotation to be removed")
 	}
 
-	t.Logf("Token refresh completed: RobotID changed from 100 to %d", updated.Status.RobotID)
+	t.Logf("Token refresh completed: RobotID unchanged (still %d)", updated.Status.RobotID)
 }
 
 func hasFinalizer(hp *v1.HarborProject, finalizer string) bool {

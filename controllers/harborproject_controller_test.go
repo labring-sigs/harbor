@@ -27,6 +27,7 @@ type harborClient interface {
 	CreateProject(ctx context.Context, spec harbor.ProjectSpec) (int64, error)
 	UpdateProject(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error
 	CreateRobot(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error)
+	RefreshRobotSecret(ctx context.Context, robotID int64, secret string) error
 	DeleteProjectRobot(ctx context.Context, projectID, robotID int64) error
 	DeleteProject(ctx context.Context, projectID int64) error
 }
@@ -36,12 +37,13 @@ type harborClient interface {
 var _ harborClient = (*harbor.Client)(nil)
 
 type mockHarborClient struct {
-	getProjectByNameFn  func(ctx context.Context, name string) (*harbor.Project, error)
-	createProjectFn     func(ctx context.Context, spec harbor.ProjectSpec) (int64, error)
-	updateProjectFn     func(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error
-	createRobotFn       func(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error)
-	deleteProjectRobotFn func(ctx context.Context, projectID, robotID int64) error
-	deleteProjectFn     func(ctx context.Context, projectID int64) error
+	getProjectByNameFn    func(ctx context.Context, name string) (*harbor.Project, error)
+	createProjectFn       func(ctx context.Context, spec harbor.ProjectSpec) (int64, error)
+	updateProjectFn       func(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error
+	createRobotFn         func(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error)
+	refreshRobotSecretFn  func(ctx context.Context, robotID int64, secret string) error
+	deleteProjectRobotFn  func(ctx context.Context, projectID, robotID int64) error
+	deleteProjectFn       func(ctx context.Context, projectID int64) error
 }
 
 func (m *mockHarborClient) GetProjectByName(ctx context.Context, name string) (*harbor.Project, error) {
@@ -61,6 +63,9 @@ func (m *mockHarborClient) DeleteProjectRobot(ctx context.Context, projectID, ro
 }
 func (m *mockHarborClient) DeleteProject(ctx context.Context, projectID int64) error {
 	return m.deleteProjectFn(ctx, projectID)
+}
+func (m *mockHarborClient) RefreshRobotSecret(ctx context.Context, robotID int64, secret string) error {
+	return m.refreshRobotSecretFn(ctx, robotID, secret)
 }
 
 // ---------------------------------------------------------------------------
@@ -303,22 +308,17 @@ func TestReconcile_RefreshToken(t *testing.T) {
 	project.Status.HarborProjectID = 55
 	project.Status.HarborProjectName = "hp-refresh-proj"
 	project.Status.RobotID = 400
+	project.Status.RobotName = "robot$hp-refresh-proj+abc"
 
-	var oldRobotDeleted int64
-	var newRobotID int64 = 500
+	var refreshedRobotID int64
+	var refreshedSecret string
 	mock := &mockHarborClient{
 		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
 			return &harbor.Project{ProjectID: 55, Name: "hp-refresh-proj"}, nil
 		},
-		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
-			return &harbor.RobotAccount{
-				ID:    newRobotID,
-				Name:  "robot-refresh-xyz",
-				Token: "new-token-789",
-			}, nil
-		},
-		deleteProjectRobotFn: func(_ context.Context, projectID, robotID int64) error {
-			oldRobotDeleted = robotID
+		refreshRobotSecretFn: func(_ context.Context, robotID int64, secret string) error {
+			refreshedRobotID = robotID
+			refreshedSecret = secret
 			return nil
 		},
 	}
@@ -331,16 +331,19 @@ func TestReconcile_RefreshToken(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify old robot was deleted
-	if oldRobotDeleted != 400 {
-		t.Errorf("expected old robot 400 to be deleted, got %d", oldRobotDeleted)
+	// Verify RefreshRobotSecret was called with correct robotID
+	if refreshedRobotID != 400 {
+		t.Errorf("expected robotID 400, got %d", refreshedRobotID)
+	}
+	if refreshedSecret == "" {
+		t.Fatal("expected a non-empty secret to be generated")
 	}
 
-	// Verify status updated
+	// Verify status unchanged (robot ID/name stays the same)
 	updated := &v1.HarborProject{}
 	_ = r.Get(context.Background(), types.NamespacedName{Name: "refresh-proj"}, updated)
-	if updated.Status.RobotID != newRobotID {
-		t.Errorf("expected RobotID %d, got %d", newRobotID, updated.Status.RobotID)
+	if updated.Status.RobotID != 400 {
+		t.Errorf("expected RobotID to remain 400, got %d", updated.Status.RobotID)
 	}
 
 	// Verify refresh annotation removed
@@ -348,7 +351,7 @@ func TestReconcile_RefreshToken(t *testing.T) {
 		t.Fatal("expected refresh annotation to be removed")
 	}
 
-	// Verify secret was updated with new token
+	// Verify secret was updated with new generated secret
 	secret := &corev1.Secret{}
 	_ = r.Get(context.Background(), types.NamespacedName{Name: "harbor-registry-cred-refresh-proj", Namespace: "ns-1"}, secret)
 
@@ -356,42 +359,33 @@ func TestReconcile_RefreshToken(t *testing.T) {
 	_ = json.Unmarshal(secret.Data[corev1.DockerConfigJsonKey], &dc)
 	auths := dc["auths"].(map[string]interface{})
 	entry := auths["registry.test.sealos.io"].(map[string]interface{})
-	if entry["password"] != "new-token-789" {
-		t.Errorf("expected password 'new-token-789', got %v", entry["password"])
+	if entry["password"] != refreshedSecret {
+		t.Errorf("expected password %q, got %v", refreshedSecret, entry["password"])
+	}
+	if entry["username"] != "robot$hp-refresh-proj+abc" {
+		t.Errorf("expected username %q, got %v", "robot$hp-refresh-proj+abc", entry["username"])
 	}
 }
 
-func TestReconcile_RefreshToken_NoOldRobot(t *testing.T) {
-	project := fakeProject("refresh-noold", string(v1.HarborPhaseReady), true)
+func TestReconcile_RefreshToken_NoRobot(t *testing.T) {
+	project := fakeProject("refresh-norobot", string(v1.HarborPhaseReady), true)
 	project.Annotations = map[string]string{refreshAnnotation: "true"}
 	project.Status.HarborProjectID = 60
-	project.Status.HarborProjectName = "hp-refresh-noold"
-	project.Status.RobotID = 0 // no old robot
+	project.Status.HarborProjectName = "hp-refresh-norobot"
+	project.Status.RobotID = 0 // no existing robot
 
-	var deleteCalled bool
 	mock := &mockHarborClient{
 		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
-			return &harbor.Project{ProjectID: 60, Name: "hp-refresh-noold"}, nil
-		},
-		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
-			return &harbor.RobotAccount{ID: 601, Name: "robot-new", Token: "tok"}, nil
-		},
-		deleteProjectRobotFn: func(_ context.Context, projectID, robotID int64) error {
-			deleteCalled = true
-			return nil
+			return &harbor.Project{ProjectID: 60, Name: "hp-refresh-norobot"}, nil
 		},
 	}
 
 	r := newTestReconciler(mock, project)
-	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "refresh-noold"}}
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "refresh-norobot"}}
 
 	_, err := r.Reconcile(context.Background(), req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if deleteCalled {
-		t.Fatal("DeleteProjectRobot should not be called when RobotID is 0")
+	if err == nil {
+		t.Fatal("expected error when RobotID is 0, got nil")
 	}
 }
 

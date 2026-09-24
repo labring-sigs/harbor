@@ -3,6 +3,7 @@ package harbor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -411,6 +412,48 @@ func TestDeleteProjectRobot_Error(t *testing.T) {
 	err := client.DeleteProjectRobot(context.Background(), 5, 999)
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+
+func TestRefreshRobotSecret_Success(t *testing.T) {
+	client := newMockClient(func(req *http.Request) (int, string) {
+		if req.Method != http.MethodPatch {
+			t.Errorf("expected PATCH, got %s", req.Method)
+		}
+		if req.URL.Path != "/api/v2.0/robots/42" {
+			t.Errorf("expected /api/v2.0/robots/42, got %s", req.URL.Path)
+		}
+		// Verify request body contains the secret
+		var bodyMap map[string]string
+		json.NewDecoder(req.Body).Decode(&bodyMap)
+		if bodyMap["secret"] != "my-new-secret" {
+			t.Errorf(`expected secret="my-new-secret", got %q`, bodyMap["secret"])
+		}
+		return http.StatusOK, ""
+	})
+
+	err := client.RefreshRobotSecret(context.Background(), 42, "my-new-secret")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRefreshRobotSecret_NotFound(t *testing.T) {
+	client := newMockClient(func(req *http.Request) (int, string) {
+		return http.StatusNotFound, `{"errors":[{"code":"NOT_FOUND","message":"robot not found"}]}`
+	})
+
+	err := client.RefreshRobotSecret(context.Background(), 999, "secret")
+	if err == nil {
+		t.Fatal("expected error for not-found robot")
+	}
+	var apiErr *ErrAPIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected ErrAPIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusNotFound {
+		t.Errorf("expected status 404, got %d", apiErr.StatusCode)
 	}
 }
 
