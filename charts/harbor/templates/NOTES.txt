@@ -9,7 +9,7 @@ Components disabled: Portal · Trivy · Notary · ChartMuseum · Exporter
        deploy/harbor-core -- \
        harbor password --set-init-password
 
-   The admin password is auto-generated (see the admin-password Secret).
+   Or use the default admin/Harbor12345 (change immediately for production).
 
 2. Verify Harbor is reachable:
 

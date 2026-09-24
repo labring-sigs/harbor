@@ -24,9 +24,9 @@ enabled: true
 
 # ── Subchart overrides (these are forwarded to the official harbor-helm) ──
 harbor:
-  # ---- Initial admin password (default: auto-generated) ----
+  # ---- Initial admin password (default: "Harbor12345") ----
   # Change this immediately after deployment!
-  harborAdminPassword: ""
+  harborAdminPassword: "Harbor12345"
 
   # ---- Networking ----
   expose:
