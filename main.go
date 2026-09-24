@@ -30,12 +30,17 @@ func init() {
 	utilruntime.Must(harborv1.AddToScheme(scheme))
 }
 
+const (
+	defaultStorageLimitFlagDefault = 5 * 1024 * 1024 * 1024 // 5 GiB
+)
+
 func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
 	var enableProjectAutoProvision bool
 	var ownerLabelKey string
+	var defaultStorageLimit int64
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -46,6 +51,8 @@ func main() {
 		"Enable automatic creation of HarborProject CRs for namespaces that carry the owner label key.")
 	flag.StringVar(&ownerLabelKey, "owner-label-key", "user.sealos.io/owner",
 		"Label key on namespaces used to determine the owner for auto-provisioned HarborProject CRs.")
+	flag.Int64Var(&defaultStorageLimit, "default-storage-limit", defaultStorageLimitFlagDefault,
+		"Default storage limit in bytes for auto-provisioned HarborProjects. Use -1 for unlimited.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -97,11 +104,13 @@ func main() {
 	if enableProjectAutoProvision {
 		setupLog.Info("project auto-provision enabled",
 			"ownerLabelKey", ownerLabelKey,
+			"defaultStorageLimit", defaultStorageLimit,
 		)
 		if err = (&controllers.ProjectAutoProvisionReconciler{
-			Client:        mgr.GetClient(),
-			Scheme:        mgr.GetScheme(),
-			OwnerLabelKey: ownerLabelKey,
+			Client:                   mgr.GetClient(),
+			Scheme:                   mgr.GetScheme(),
+			OwnerLabelKey:            ownerLabelKey,
+			DefaultStorageLimitBytes: defaultStorageLimit,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "ProjectAutoProvision")
 			os.Exit(1)

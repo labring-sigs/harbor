@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -31,6 +32,12 @@ const (
 	// the controller will fully adopt the new namespace rather than treating the
 	// existing HarborProject CR as stale.
 	SourceNamespaceUIDLabel = "harbor.sealos.io/source-namespace-uid"
+
+	// StorageLimitAnnotation is an optional annotation on a Namespace that
+	// overrides the default storage limit for the auto-provisioned
+	// HarborProject. The value is a byte count (e.g. "10737418240" for 10 GB)
+	// or "-1" for unlimited. When absent, DefaultStorageLimitBytes is used.
+	StorageLimitAnnotation = "harbor.sealos.io/storage-limit"
 )
 
 // ProjectAutoProvisionReconciler watches Namespace resources and automatically
@@ -43,6 +50,11 @@ type ProjectAutoProvisionReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
 	OwnerLabelKey string
+
+	// DefaultStorageLimitBytes is the storage limit (in bytes) assigned to
+	// auto-provisioned HarborProject CRs when the namespace does not carry
+	// the StorageLimitAnnotation. Use -1 for unlimited.
+	DefaultStorageLimitBytes int64
 }
 
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
@@ -74,7 +86,23 @@ func (r *ProjectAutoProvisionReconciler) Reconcile(ctx context.Context, req ctrl
 		return ctrl.Result{}, nil
 	}
 
-	// 3. Construct the desired HarborProject spec
+	// 3. Determine storage limit: namespace annotation overrides the default
+	storageLimit := r.DefaultStorageLimitBytes
+	if v, ok := ns.Annotations[StorageLimitAnnotation]; ok {
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			logger.Info("invalid storage-limit annotation, falling back to default",
+				"namespace", ns.Name,
+				"annotation", StorageLimitAnnotation,
+				"value", v,
+				"error", err,
+			)
+		} else {
+			storageLimit = parsed
+		}
+	}
+
+	// 4. Construct the desired HarborProject spec
 	hpName := "hp-" + ns.Name
 
 	desired := &v1.HarborProject{
@@ -90,7 +118,7 @@ func (r *ProjectAutoProvisionReconciler) Reconcile(ctx context.Context, req ctrl
 			Owner:         owner,
 			ProjectName:   ns.Name,
 			NamespaceRefs: []string{ns.Name},
-			StorageLimit:  5 * 1024 * 1024 * 1024, // 5 GB
+			StorageLimit:  storageLimit,
 			Public:        false,
 			AutoScan:      false,
 			RobotPermissions: []v1.RobotPermission{
@@ -100,15 +128,16 @@ func (r *ProjectAutoProvisionReconciler) Reconcile(ctx context.Context, req ctrl
 		},
 	}
 
-	// 4. Try to get the existing HarborProject CR
+	// 5. Try to get the existing HarborProject CR
 	existing := &v1.HarborProject{}
 	if err := r.Get(ctx, types.NamespacedName{Name: hpName}, existing); err != nil {
 		if errors.IsNotFound(err) {
-			// 4a. Does not exist → create it
+			// 5a. Does not exist → create it
 			logger.Info("creating auto-provisioned HarborProject",
 				"namespace", ns.Name,
 				"hpName", hpName,
 				"owner", owner,
+				"storageLimit", storageLimit,
 			)
 			if err := r.Create(ctx, desired); err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to create HarborProject %s: %w", hpName, err)
@@ -118,18 +147,15 @@ func (r *ProjectAutoProvisionReconciler) Reconcile(ctx context.Context, req ctrl
 		return ctrl.Result{}, fmt.Errorf("failed to get HarborProject %s: %w", hpName, err)
 	}
 
-	// 5. Adopt/update existing CR
-	//    Check if the namespace was deleted and recreated (different UID).
-	//    If so, we still adopt it — the CR exists and we update spec+labels.
+	// 6. Adopt/update existing CR
 	if needsUpdate(existing, desired) {
 		logger.Info("updating auto-provisioned HarborProject",
 			"namespace", ns.Name,
 			"hpName", hpName,
 			"owner", owner,
+			"storageLimit", storageLimit,
 		)
 		updated := existing.DeepCopy()
-		// Only update fields managed by this controller; preserve unmanaged
-		// fields such as DisplayName and any future additions.
 		updated.Spec.Owner = desired.Spec.Owner
 		updated.Spec.ProjectName = desired.Spec.ProjectName
 		updated.Spec.NamespaceRefs = desired.Spec.NamespaceRefs
@@ -187,8 +213,7 @@ func needsUpdate(existing, desired *v1.HarborProject) bool {
 		return true
 	}
 
-	// Compare managed labels (auto-provision labels should be present on
-	// existing CRs that were adopted or created by this controller)
+	// Compare managed labels
 	if existing.Labels[AutoProvisionLabel] != desired.Labels[AutoProvisionLabel] {
 		return true
 	}

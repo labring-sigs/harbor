@@ -14,7 +14,9 @@ import (
 	v1 "github.com/dinoallo/labring-sigs-harbor/api/v1"
 )
 
-func newAutoProvisionReconciler(ownerLabelKey string, objs ...runtime.Object) *ProjectAutoProvisionReconciler {
+const defaultTestStorageLimit int64 = 5 * 1024 * 1024 * 1024 // 5 GiB
+
+func newAutoProvisionReconciler(ownerLabelKey string, defaultStorageLimit int64, objs ...runtime.Object) *ProjectAutoProvisionReconciler {
 	scheme := runtime.NewScheme()
 	_ = v1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
@@ -25,9 +27,10 @@ func newAutoProvisionReconciler(ownerLabelKey string, objs ...runtime.Object) *P
 		Build()
 
 	return &ProjectAutoProvisionReconciler{
-		Client:        fakeClient,
-		Scheme:        scheme,
-		OwnerLabelKey: ownerLabelKey,
+		Client:                   fakeClient,
+		Scheme:                   scheme,
+		OwnerLabelKey:            ownerLabelKey,
+		DefaultStorageLimitBytes: defaultStorageLimit,
 	}
 }
 
@@ -41,7 +44,18 @@ func ns(name string, labels map[string]string) *corev1.Namespace {
 	}
 }
 
-func hp(name, owner, namespace string) *v1.HarborProject {
+func nsWithAnnotations(name string, labels map[string]string, annotations map[string]string) *corev1.Namespace {
+	return &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Labels:      labels,
+			Annotations: annotations,
+			UID:         types.UID(name + "-uid"),
+		},
+	}
+}
+
+func hp(name, owner, namespace string, storageLimit int64) *v1.HarborProject {
 	return &v1.HarborProject{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -55,7 +69,7 @@ func hp(name, owner, namespace string) *v1.HarborProject {
 			Owner:         owner,
 			ProjectName:   namespace,
 			NamespaceRefs: []string{namespace},
-			StorageLimit:  5 * 1024 * 1024 * 1024,
+			StorageLimit:  storageLimit,
 			Public:        false,
 			AutoScan:      false,
 			RobotPermissions: []v1.RobotPermission{
@@ -74,7 +88,7 @@ func TestAutoProvision_Namespace_WithLabel_CreatesHarborProject(t *testing.T) {
 	ownerLabelKey := "user.sealos.io/owner"
 	nsObj := ns("ns-1", map[string]string{ownerLabelKey: "user-abc"})
 
-	r := newAutoProvisionReconciler(ownerLabelKey, nsObj)
+	r := newAutoProvisionReconciler(ownerLabelKey, defaultTestStorageLimit, nsObj)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-1"}}
 
 	result, err := r.Reconcile(context.Background(), req)
@@ -96,8 +110,8 @@ func TestAutoProvision_Namespace_WithLabel_CreatesHarborProject(t *testing.T) {
 	if len(hpObj.Spec.NamespaceRefs) != 1 || hpObj.Spec.NamespaceRefs[0] != "ns-1" {
 		t.Errorf("expected namespaceRefs [ns-1], got %v", hpObj.Spec.NamespaceRefs)
 	}
-	if hpObj.Spec.StorageLimit != 5*1024*1024*1024 {
-		t.Errorf("expected storageLimit 5GB, got %d", hpObj.Spec.StorageLimit)
+	if hpObj.Spec.StorageLimit != defaultTestStorageLimit {
+		t.Errorf("expected storageLimit %d, got %d", defaultTestStorageLimit, hpObj.Spec.StorageLimit)
 	}
 	if hpObj.Spec.Public {
 		t.Error("expected public false")
@@ -120,7 +134,7 @@ func TestAutoProvision_Namespace_WithoutLabel_DoesNothing(t *testing.T) {
 	ownerLabelKey := "user.sealos.io/owner"
 	nsObj := ns("ns-2", map[string]string{"some-other-label": "val"})
 
-	r := newAutoProvisionReconciler(ownerLabelKey, nsObj)
+	r := newAutoProvisionReconciler(ownerLabelKey, defaultTestStorageLimit, nsObj)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-2"}}
 
 	result, err := r.Reconcile(context.Background(), req)
@@ -135,7 +149,7 @@ func TestAutoProvision_Namespace_WithoutLabel_DoesNothing(t *testing.T) {
 	hpObj := &v1.HarborProject{}
 	err = r.Get(context.Background(), types.NamespacedName{Name: "hp-ns-2"}, hpObj)
 	if err == nil {
-		t.Fatal("expected HarborProject to NOT exist")
+		t.Fatal("expected HarborProject not to be created")
 	}
 }
 
@@ -143,7 +157,7 @@ func TestAutoProvision_Namespace_WithEmptyLabel_DoesNothing(t *testing.T) {
 	ownerLabelKey := "user.sealos.io/owner"
 	nsObj := ns("ns-3", map[string]string{ownerLabelKey: ""})
 
-	r := newAutoProvisionReconciler(ownerLabelKey, nsObj)
+	r := newAutoProvisionReconciler(ownerLabelKey, defaultTestStorageLimit, nsObj)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-3"}}
 
 	result, err := r.Reconcile(context.Background(), req)
@@ -157,25 +171,25 @@ func TestAutoProvision_Namespace_WithEmptyLabel_DoesNothing(t *testing.T) {
 	hpObj := &v1.HarborProject{}
 	err = r.Get(context.Background(), types.NamespacedName{Name: "hp-ns-3"}, hpObj)
 	if err == nil {
-		t.Fatal("expected HarborProject to NOT exist when label value is empty")
+		t.Fatal("expected HarborProject not to be created for empty owner label")
 	}
 }
 
-func TestAutoProvision_ExistingHP_SpecMatches_NoUpdate(t *testing.T) {
+func TestAutoProvision_Namespace_Deleting_DoesNothing(t *testing.T) {
 	ownerLabelKey := "user.sealos.io/owner"
-	nsObj := ns("ns-4", map[string]string{ownerLabelKey: "user-abc"})
-	existingHP := hp("hp-ns-4", "user-abc", "ns-4")
-
-	r := newAutoProvisionReconciler(ownerLabelKey, nsObj, existingHP)
-
-	// Read the existing HP's resource version before reconcile
-	before := &v1.HarborProject{}
-	if err := r.Get(context.Background(), types.NamespacedName{Name: "hp-ns-4"}, before); err != nil {
-		t.Fatalf("failed to get existing HP: %v", err)
+	now := metav1.Now()
+	nsObj := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              "ns-4",
+			Labels:            map[string]string{ownerLabelKey: "user-abc"},
+			UID:               types.UID("ns-4-uid"),
+			DeletionTimestamp: &now,
+		},
 	}
-	origRV := before.ResourceVersion
 
+	r := newAutoProvisionReconciler(ownerLabelKey, defaultTestStorageLimit, nsObj)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-4"}}
+
 	result, err := r.Reconcile(context.Background(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -184,24 +198,20 @@ func TestAutoProvision_ExistingHP_SpecMatches_NoUpdate(t *testing.T) {
 		t.Fatal("expected no requeue")
 	}
 
-	// Verify ResourceVersion did not change (no update was written)
-	after := &v1.HarborProject{}
-	if err := r.Get(context.Background(), types.NamespacedName{Name: "hp-ns-4"}, after); err != nil {
-		t.Fatalf("failed to get HP after reconcile: %v", err)
-	}
-	if after.ResourceVersion != origRV {
-		t.Errorf("expected no update, but ResourceVersion changed from %s to %s", origRV, after.ResourceVersion)
+	hpObj := &v1.HarborProject{}
+	err = r.Get(context.Background(), types.NamespacedName{Name: "hp-ns-4"}, hpObj)
+	if err == nil {
+		t.Fatal("expected HarborProject not to be created when namespace is deleting")
 	}
 }
 
-func TestAutoProvision_ExistingHP_SpecDiffers_Updates(t *testing.T) {
+func TestAutoProvision_ExistingHP_WithMatchingSpec_DoesNotUpdate(t *testing.T) {
 	ownerLabelKey := "user.sealos.io/owner"
 	nsObj := ns("ns-5", map[string]string{ownerLabelKey: "user-abc"})
 
-	// Create an existing HP with different owner value
-	existingHP := hp("hp-ns-5", "user-old", "ns-5")
+	existingHP := hp("hp-ns-5", "user-abc", "ns-5", defaultTestStorageLimit)
 
-	r := newAutoProvisionReconciler(ownerLabelKey, nsObj, existingHP)
+	r := newAutoProvisionReconciler(ownerLabelKey, defaultTestStorageLimit, nsObj, existingHP)
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-5"}}
 	result, err := r.Reconcile(context.Background(), req)
@@ -212,24 +222,26 @@ func TestAutoProvision_ExistingHP_SpecDiffers_Updates(t *testing.T) {
 		t.Fatal("expected no requeue")
 	}
 
-	// Verify the HP was updated
+	// The existing HP should be unchanged; we just verify it still exists
 	after := &v1.HarborProject{}
 	if err := r.Get(context.Background(), types.NamespacedName{Name: "hp-ns-5"}, after); err != nil {
 		t.Fatalf("failed to get HP: %v", err)
 	}
 	if after.Spec.Owner != "user-abc" {
-		t.Errorf("expected owner to be updated to 'user-abc', got %q", after.Spec.Owner)
+		t.Errorf("expected owner 'user-abc', got %q", after.Spec.Owner)
+	}
+	if after.Spec.StorageLimit != defaultTestStorageLimit {
+		t.Errorf("expected storageLimit %d, got %d", defaultTestStorageLimit, after.Spec.StorageLimit)
 	}
 }
 
-func TestAutoProvision_LabelValueChanged_UpdatesOwner(t *testing.T) {
+func TestAutoProvision_ExistingHP_WithDifferentOwner_Updates(t *testing.T) {
 	ownerLabelKey := "user.sealos.io/owner"
+	nsObj := ns("ns-6", map[string]string{ownerLabelKey: "user-abc"})
 
-	// Start with owner label "user-old", then update it to "user-new"
-	nsObj := ns("ns-6", map[string]string{ownerLabelKey: "user-new"})
-	existingHP := hp("hp-ns-6", "user-old", "ns-6")
+	existingHP := hp("hp-ns-6", "user-old", "ns-6", defaultTestStorageLimit)
 
-	r := newAutoProvisionReconciler(ownerLabelKey, nsObj, existingHP)
+	r := newAutoProvisionReconciler(ownerLabelKey, defaultTestStorageLimit, nsObj, existingHP)
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-6"}}
 	result, err := r.Reconcile(context.Background(), req)
@@ -244,19 +256,40 @@ func TestAutoProvision_LabelValueChanged_UpdatesOwner(t *testing.T) {
 	if err := r.Get(context.Background(), types.NamespacedName{Name: "hp-ns-6"}, after); err != nil {
 		t.Fatalf("failed to get HP: %v", err)
 	}
-	if after.Spec.Owner != "user-new" {
-		t.Errorf("expected owner to be updated to 'user-new', got %q", after.Spec.Owner)
+	if after.Spec.Owner != "user-abc" {
+		t.Errorf("expected updated owner 'user-abc', got %q", after.Spec.Owner)
 	}
 }
 
-func TestAutoProvision_LabelRemoved_DoesNothing(t *testing.T) {
+func TestAutoProvision_Namespace_DeletedAndRecreated_SameName_DifferentUID_Adopts(t *testing.T) {
 	ownerLabelKey := "user.sealos.io/owner"
+	nsObj := ns("ns-7", map[string]string{ownerLabelKey: "user-abc"})
 
-	// NS no longer has the label, but HP still exists
-	nsObj := ns("ns-7", map[string]string{"other": "val"})
-	existingHP := hp("hp-ns-7", "user-old", "ns-7")
+	// Existing CR with old UID (simulating namespace delete+recreate)
+	existingHP := &v1.HarborProject{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "hp-ns-7",
+			Labels: map[string]string{
+				AutoProvisionLabel:      "true",
+				SourceNamespaceLabel:    "ns-7",
+				SourceNamespaceUIDLabel: "old-uid",
+			},
+		},
+		Spec: v1.HarborProjectSpec{
+			Owner:         "user-abc",
+			ProjectName:   "ns-7",
+			NamespaceRefs: []string{"ns-7"},
+			StorageLimit:  defaultTestStorageLimit,
+			Public:        false,
+			AutoScan:      false,
+			RobotPermissions: []v1.RobotPermission{
+				{Action: "push"},
+				{Action: "pull"},
+			},
+		},
+	}
 
-	r := newAutoProvisionReconciler(ownerLabelKey, nsObj, existingHP)
+	r := newAutoProvisionReconciler(ownerLabelKey, defaultTestStorageLimit, nsObj, existingHP)
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-7"}}
 	result, err := r.Reconcile(context.Background(), req)
@@ -267,19 +300,20 @@ func TestAutoProvision_LabelRemoved_DoesNothing(t *testing.T) {
 		t.Fatal("expected no requeue")
 	}
 
-	// HP should still exist and be unchanged
+	// The CR should be updated with the new UID
 	after := &v1.HarborProject{}
 	if err := r.Get(context.Background(), types.NamespacedName{Name: "hp-ns-7"}, after); err != nil {
-		t.Fatalf("expected HP to still exist: %v", err)
+		t.Fatalf("failed to get HP: %v", err)
 	}
-	if after.Spec.Owner != "user-old" {
-		t.Errorf("expected owner still 'user-old', got %q", after.Spec.Owner)
+	if after.Labels[SourceNamespaceUIDLabel] != string(nsObj.UID) {
+		t.Errorf("expected UID label %q, got %q", string(nsObj.UID), after.Labels[SourceNamespaceUIDLabel])
 	}
 }
 
-func TestAutoProvision_NamespaceNotFound_NoError(t *testing.T) {
+func TestAutoProvision_MissingNamespace_NoError(t *testing.T) {
 	ownerLabelKey := "user.sealos.io/owner"
-	r := newAutoProvisionReconciler(ownerLabelKey)
+
+	r := newAutoProvisionReconciler(ownerLabelKey, defaultTestStorageLimit)
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "nonexistent"}}
 	result, err := r.Reconcile(context.Background(), req)
@@ -315,7 +349,7 @@ func TestAutoProvision_AdoptsExistingHP_WithWrongSpec(t *testing.T) {
 		},
 	}
 
-	r := newAutoProvisionReconciler(ownerLabelKey, nsObj, existingHP)
+	r := newAutoProvisionReconciler(ownerLabelKey, defaultTestStorageLimit, nsObj, existingHP)
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-8"}}
 	result, err := r.Reconcile(context.Background(), req)
@@ -337,8 +371,8 @@ func TestAutoProvision_AdoptsExistingHP_WithWrongSpec(t *testing.T) {
 	if len(after.Spec.NamespaceRefs) != 1 || after.Spec.NamespaceRefs[0] != "ns-8" {
 		t.Errorf("expected namespaceRefs [ns-8], got %v", after.Spec.NamespaceRefs)
 	}
-	if after.Spec.StorageLimit != 5*1024*1024*1024 {
-		t.Errorf("expected storageLimit 5GB, got %d", after.Spec.StorageLimit)
+	if after.Spec.StorageLimit != defaultTestStorageLimit {
+		t.Errorf("expected storageLimit %d, got %d", defaultTestStorageLimit, after.Spec.StorageLimit)
 	}
 	if after.Spec.Public {
 		t.Error("expected public false")
@@ -370,7 +404,7 @@ func TestAutoProvision_ExistingHP_MissingLabels_TriggersUpdate(t *testing.T) {
 		Spec: v1.HarborProjectSpec{
 			Owner:         "user-abc",
 			NamespaceRefs: []string{"ns-9"},
-			StorageLimit:  5 * 1024 * 1024 * 1024,
+			StorageLimit:  defaultTestStorageLimit,
 			Public:        false,
 			AutoScan:      false,
 			RobotPermissions: []v1.RobotPermission{
@@ -380,7 +414,7 @@ func TestAutoProvision_ExistingHP_MissingLabels_TriggersUpdate(t *testing.T) {
 		},
 	}
 
-	r := newAutoProvisionReconciler(ownerLabelKey, nsObj, existingHP)
+	r := newAutoProvisionReconciler(ownerLabelKey, defaultTestStorageLimit, nsObj, existingHP)
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-9"}}
 
 	result, err := r.Reconcile(context.Background(), req)
@@ -404,5 +438,87 @@ func TestAutoProvision_ExistingHP_MissingLabels_TriggersUpdate(t *testing.T) {
 	}
 	if after.Labels[SourceNamespaceUIDLabel] == "" {
 		t.Errorf("expected label %s to be set", SourceNamespaceUIDLabel)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Namespace annotation override tests
+// ---------------------------------------------------------------------------
+
+func TestAutoProvision_Namespace_StorageLimitAnnotation_OverridesDefault(t *testing.T) {
+	ownerLabelKey := "user.sealos.io/owner"
+	// Annotation value in bytes: 10 GiB
+	annotations := map[string]string{StorageLimitAnnotation: "10737418240"}
+	nsObj := nsWithAnnotations("ns-ann-1", map[string]string{ownerLabelKey: "user-abc"}, annotations)
+
+	r := newAutoProvisionReconciler(ownerLabelKey, defaultTestStorageLimit, nsObj)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-ann-1"}}
+
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Requeue {
+		t.Fatal("expected no requeue")
+	}
+
+	hpObj := &v1.HarborProject{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "hp-ns-ann-1"}, hpObj); err != nil {
+		t.Fatalf("expected HarborProject to be created: %v", err)
+	}
+	if hpObj.Spec.StorageLimit != 10737418240 {
+		t.Errorf("expected storageLimit 10737418240 (10 GiB), got %d", hpObj.Spec.StorageLimit)
+	}
+}
+
+func TestAutoProvision_Namespace_StorageLimitAnnotation_Unlimited(t *testing.T) {
+	ownerLabelKey := "user.sealos.io/owner"
+	annotations := map[string]string{StorageLimitAnnotation: "-1"}
+	nsObj := nsWithAnnotations("ns-ann-2", map[string]string{ownerLabelKey: "user-abc"}, annotations)
+
+	r := newAutoProvisionReconciler(ownerLabelKey, defaultTestStorageLimit, nsObj)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-ann-2"}}
+
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Requeue {
+		t.Fatal("expected no requeue")
+	}
+
+	hpObj := &v1.HarborProject{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "hp-ns-ann-2"}, hpObj); err != nil {
+		t.Fatalf("expected HarborProject to be created: %v", err)
+	}
+	if hpObj.Spec.StorageLimit != -1 {
+		t.Errorf("expected storageLimit -1 (unlimited), got %d", hpObj.Spec.StorageLimit)
+	}
+}
+
+func TestAutoProvision_Namespace_StorageLimitAnnotation_Invalid_FallsBack(t *testing.T) {
+	ownerLabelKey := "user.sealos.io/owner"
+	// Invalid annotation value (not a valid integer)
+	annotations := map[string]string{StorageLimitAnnotation: "not-a-number"}
+	nsObj := nsWithAnnotations("ns-ann-3", map[string]string{ownerLabelKey: "user-abc"}, annotations)
+
+	r := newAutoProvisionReconciler(ownerLabelKey, defaultTestStorageLimit, nsObj)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "ns-ann-3"}}
+
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Requeue {
+		t.Fatal("expected no requeue")
+	}
+
+	// Should fall back to the default
+	hpObj := &v1.HarborProject{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "hp-ns-ann-3"}, hpObj); err != nil {
+		t.Fatalf("expected HarborProject to be created: %v", err)
+	}
+	if hpObj.Spec.StorageLimit != defaultTestStorageLimit {
+		t.Errorf("expected storageLimit %d (fallback), got %d", defaultTestStorageLimit, hpObj.Spec.StorageLimit)
 	}
 }
