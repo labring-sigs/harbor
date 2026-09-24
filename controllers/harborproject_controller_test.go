@@ -758,6 +758,135 @@ func TestReconcile_UpdatePublicAutoScan_HashMismatchStillRotates(t *testing.T) {
 		t.Error("expected CreateRobot to be called when namespaceRefs changed (hash mismatch)")
 	}
 }
+
+
+func TestReconcile_FastPath_ProjectIDChanged(t *testing.T) {
+	// If Harbor deleted and recreated the project (different ProjectID with same name),
+	// the fast path must NOT be taken even if everything else matches.
+	project := fakeProject("project-id-change", string(v1.HarborPhaseReady), true)
+	project.Generation = 2
+	project.Status.HarborProjectID = 77  // old ID
+	project.Status.HarborProjectName = "hp-project-id-change"
+	project.Status.RobotID = 88
+	project.Status.ObservedGeneration = 0
+	project.Status.LastSpecHash = "b2f53f2fa22fd8fa" // matches default fakeProject spec
+	project.Spec.Public = true
+	project.Spec.AutoScan = true
+
+	createRobotCalled := false
+
+	mock := &mockHarborClient{
+		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
+			// Project ID changed from 77 to 99 (Harbor recreated the project)
+			return &harbor.Project{ProjectID: 99, Name: "hp-project-id-change"}, nil
+		},
+		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			return nil
+		},
+		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
+			createRobotCalled = true
+			return &harbor.RobotAccount{ID: 99, Name: "robot-new", Token: "tok"}, nil
+		},
+		deleteProjectRobotFn: func(_ context.Context, projectID int64, robotID int64) error {
+			return nil
+		},
+	}
+
+	r := newTestReconciler(mock, project)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "project-id-change"}}
+
+	_, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !createRobotCalled {
+		t.Error("expected CreateRobot to be called when HarborProjectID changed")
+	}
+
+	// Verify the stored ID was updated to the new value
+	updated := &v1.HarborProject{}
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "project-id-change"}, updated)
+	if updated.Status.HarborProjectID != 99 {
+		t.Errorf("expected HarborProjectID 99, got %d", updated.Status.HarborProjectID)
+	}
+}
+
+func TestReconcile_ExistingSecretsUpdated(t *testing.T) {
+	// Test that when secrets already exist in the target namespaces,
+	// the controller updates them with new robot credentials instead of failing.
+	project := fakeProject("existing-secret", string(v1.HarborPhaseReady), true)
+	project.Generation = 2
+	project.Status.HarborProjectID = 42
+	project.Status.HarborProjectName = "hp-existing-secret"
+	project.Status.RobotID = 0  // no previous robot → full flow
+	project.Status.ObservedGeneration = 0
+	project.Spec.Public = true
+
+	// Pre-create a secret in ns-1 with old credentials
+	oldSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "harbor-registry-cred-existing-secret",
+			Namespace: "ns-1",
+		},
+		Data: map[string][]byte{
+			corev1.DockerConfigJsonKey: []byte(`{"auths":{"old-registry":{"auth":"b2xk"}}}`),
+		},
+		Type: corev1.SecretTypeDockerConfigJson,
+	}
+
+	mock := &mockHarborClient{
+		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
+			return &harbor.Project{ProjectID: 42, Name: "hp-existing-secret"}, nil
+		},
+		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			return nil
+		},
+		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
+			return &harbor.RobotAccount{ID: 55, Name: "robot-new", Token: "new-token"}, nil
+		},
+		deleteProjectRobotFn: func(_ context.Context, projectID int64, robotID int64) error {
+			return nil
+		},
+	}
+
+	r := newTestReconciler(mock, project, oldSecret)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "existing-secret"}}
+
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Requeue {
+		t.Fatal("did not expect requeue")
+	}
+
+	// Verify the updated project status
+	updated := &v1.HarborProject{}
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "existing-secret"}, updated)
+	if updated.Status.Phase != v1.HarborPhaseReady {
+		t.Errorf("expected phase Ready, got %q", updated.Status.Phase)
+	}
+	if updated.Status.RobotID != 55 {
+		t.Errorf("expected RobotID 55, got %d", updated.Status.RobotID)
+	}
+
+	// Verify the existing secret was updated with new credentials
+	sec := &corev1.Secret{}
+	if err := r.Get(context.Background(), types.NamespacedName{Name: "harbor-registry-cred-existing-secret", Namespace: "ns-1"}, sec); err != nil {
+		t.Fatalf("expected secret to exist: %v", err)
+	}
+	if sec.Type != corev1.SecretTypeDockerConfigJson {
+		t.Errorf("expected secret type %s, got %s", corev1.SecretTypeDockerConfigJson, sec.Type)
+	}
+	// Verify the token was updated (should not contain old credentials)
+	token := string(sec.Data[corev1.DockerConfigJsonKey])
+	if token == "" {
+		t.Error("expected secret data to be updated with new token")
+	}
+}
 // ---------------------------------------------------------------------------
 // Helper tests
 // ---------------------------------------------------------------------------
