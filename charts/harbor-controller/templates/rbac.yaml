@@ -9,11 +9,7 @@ metadata:
 rules:
   - apiGroups: ["harbor.sealos.io"]
     resources: ["harborprojects"]
-    {{- if .Values.autoProvision.enabled }}
     verbs: ["get", "list", "watch", "create", "update", "patch"]
-    {{- else }}
-    verbs: ["get", "list", "watch", "update", "patch"]
-    {{- end }}
   - apiGroups: ["harbor.sealos.io"]
     resources: ["harborprojects/status"]
     verbs: ["get", "update", "patch"]

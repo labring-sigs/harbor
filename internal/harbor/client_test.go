@@ -230,8 +230,17 @@ func TestCreateRobot_Success(t *testing.T) {
 		if req.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", req.Method)
 		}
-		if req.URL.Path != "/api/v2.0/projects/7/robots" {
-			t.Errorf("expected /api/v2.0/projects/7/robots, got %s", req.URL.Path)
+		if req.URL.Path != "/api/v2.0/robots" {
+			t.Errorf("expected /api/v2.0/robots, got %s", req.URL.Path)
+		}
+		// Verify request body contains level and project_id
+		var bodyMap map[string]interface{}
+		json.NewDecoder(req.Body).Decode(&bodyMap)
+		if bodyMap["level"] != "project" {
+			t.Errorf("expected level=project, got %v", bodyMap["level"])
+		}
+		if bodyMap["project_id"] != float64(7) {
+			t.Errorf("expected project_id=7, got %v", bodyMap["project_id"])
 		}
 		return http.StatusCreated, `{"id":100,"name":"robot$test","token":"secret123"}`
 	})
@@ -270,8 +279,11 @@ func TestCreateRobot_Error(t *testing.T) {
 
 func TestListProjectRobots(t *testing.T) {
 	client := newMockClient(func(req *http.Request) (int, string) {
-		if req.URL.Path != "/api/v2.0/projects/3/robots" {
+		if req.URL.Path != "/api/v2.0/robots" {
 			t.Errorf("unexpected path: %s", req.URL.Path)
+		}
+		if req.URL.Query().Get("project_id") != "3" {
+			t.Errorf("expected project_id=3, got %s", req.URL.Query().Get("project_id"))
 		}
 		return http.StatusOK, `[
 			{"id":1,"name":"robot$one"},
@@ -307,8 +319,8 @@ func TestDeleteProjectRobot_Success(t *testing.T) {
 		if req.Method != http.MethodDelete {
 			t.Errorf("expected DELETE, got %s", req.Method)
 		}
-		if req.URL.Path != "/api/v2.0/projects/5/robots/9" {
-			t.Errorf("expected /api/v2.0/projects/5/robots/9, got %s", req.URL.Path)
+		if req.URL.Path != "/api/v2.0/robots/9" {
+			t.Errorf("expected /api/v2.0/robots/9, got %s", req.URL.Path)
 		}
 		return http.StatusOK, ""
 	})

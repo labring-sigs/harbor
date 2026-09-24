@@ -115,9 +115,11 @@ func (c *Client) CreateRobot(ctx context.Context, projectID int64, spec RobotSpe
 	body := map[string]interface{}{
 		"name":        spec.Name,
 		"duration":    spec.Duration,
+		"level":       "project",
+		"project_id":  projectID,
 		"permissions": spec.Permissions,
 	}
-	resp, err := c.post(ctx, fmt.Sprintf("/api/v2.0/projects/%d/robots", projectID), body)
+	resp, err := c.post(ctx, "/api/v2.0/robots", body)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +143,7 @@ func (c *Client) CreateRobot(ctx context.Context, projectID int64, spec RobotSpe
 
 // ListProjectRobots lists all robot accounts for a project
 func (c *Client) ListProjectRobots(ctx context.Context, projectID int64) ([]RobotAccount, error) {
-	resp, err := c.get(ctx, fmt.Sprintf("/api/v2.0/projects/%d/robots", projectID))
+	resp, err := c.get(ctx, fmt.Sprintf("/api/v2.0/robots?project_id=%d", projectID))
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +163,7 @@ func (c *Client) ListProjectRobots(ctx context.Context, projectID int64) ([]Robo
 
 // DeleteProjectRobot deletes a specific robot account by ID
 func (c *Client) DeleteProjectRobot(ctx context.Context, projectID int64, robotID int64) error {
-	resp, err := c.delete(ctx, fmt.Sprintf("/api/v2.0/projects/%d/robots/%d", projectID, robotID))
+	resp, err := c.delete(ctx, fmt.Sprintf("/api/v2.0/robots/%d", robotID))
 	if err != nil {
 		return err
 	}

@@ -148,22 +148,19 @@ func handleProjectByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleRobots handles the unified robot API endpoints:
+//   - GET  /api/v2.0/robots?project_id=<id>  — list robots for a project
+//   - POST /api/v2.0/robots                   — create a robot (level + project_id in body)
 func handleRobots(w http.ResponseWriter, r *http.Request) {
-	// Extract project ID: /api/v2.0/projects/<projectID>/robots
-	parts := strings.Split(strings.TrimRight(r.URL.Path, "/"), "/")
-	if len(parts) < 5 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
-		return
-	}
-	projectID, err := strconv.ParseInt(parts[4], 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid project ID"})
-		return
-	}
-
 	switch r.Method {
 	case http.MethodGet:
-		// GET /api/v2.0/projects/<id>/robots
+		// GET /api/v2.0/robots?project_id=<id>
+		projectIDStr := r.URL.Query().Get("project_id")
+		projectID, err := strconv.ParseInt(projectIDStr, 10, 64)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid or missing project_id"})
+			return
+		}
 		globalStore.mu.Lock()
 		robots := globalStore.robots[projectID]
 		if robots == nil {
@@ -173,13 +170,19 @@ func handleRobots(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, robots)
 
 	case http.MethodPost:
-		// POST /api/v2.0/projects/<id>/robots
+		// POST /api/v2.0/robots
 		var req struct {
-			Name     string `json:"name"`
-			Duration int64  `json:"duration"`
+			Name      string        `json:"name"`
+			Duration  int64         `json:"duration"`
+			Level     string        `json:"level"`
+			ProjectID int64         `json:"project_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+			return
+		}
+		if req.Level != "project" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "level must be 'project'"})
 			return
 		}
 
@@ -191,7 +194,7 @@ func handleRobots(w http.ResponseWriter, r *http.Request) {
 			Name:  req.Name,
 			Secret: fmt.Sprintf("tc-mock-secret-%d", id),
 		}
-		globalStore.robots[projectID] = append(globalStore.robots[projectID], robot)
+		globalStore.robots[req.ProjectID] = append(globalStore.robots[req.ProjectID], robot)
 		globalStore.mu.Unlock()
 
 		writeJSON(w, http.StatusCreated, robot)
@@ -201,25 +204,15 @@ func handleRobots(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleRobotByID handles DELETE /api/v2.0/robots/<robotID>
 func handleRobotByID(w http.ResponseWriter, r *http.Request) {
-	// Path: /api/v2.0/projects/<projectID>/robots/<robotID>
 	if r.Method != http.MethodDelete {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
 
-	parts := strings.Split(strings.TrimRight(r.URL.Path, "/"), "/")
-	if len(parts) < 6 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
-		return
-	}
-	projectID, err := strconv.ParseInt(parts[4], 10, 64)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid project ID"})
-		return
-	}
-	robotID, err := strconv.ParseInt(parts[6], 10, 64)
-	if err != nil {
+	robotID, ok := parseID(r.URL.Path)
+	if !ok || robotID == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid robot ID"})
 		return
 	}
@@ -227,12 +220,14 @@ func handleRobotByID(w http.ResponseWriter, r *http.Request) {
 	globalStore.mu.Lock()
 	defer globalStore.mu.Unlock()
 
-	robots := globalStore.robots[projectID]
-	for i, rbt := range robots {
-		if rbt.ID == robotID {
-			globalStore.robots[projectID] = append(robots[:i], robots[i+1:]...)
-			w.WriteHeader(http.StatusOK)
-			return
+	// Search across all projects for the robot
+	for projectID, robots := range globalStore.robots {
+		for i, rbt := range robots {
+			if rbt.ID == robotID {
+				globalStore.robots[projectID] = append(robots[:i], robots[i+1:]...)
+				w.WriteHeader(http.StatusOK)
+				return
+			}
 		}
 	}
 	writeJSON(w, http.StatusNotFound, map[string]string{"error": "robot not found"})
@@ -260,10 +255,10 @@ func mux(w http.ResponseWriter, r *http.Request) {
 	case strings.Count(path, "/") == 4 && strings.HasPrefix(path, "/api/v2.0/projects/") && !strings.Contains(path, "/robots"):
 		handleProjectByID(w, r)
 
-	case strings.HasPrefix(path, "/api/v2.0/projects/") && strings.HasSuffix(path, "/robots"):
+	case path == "/api/v2.0/robots":
 		handleRobots(w, r)
 
-	case strings.Contains(path, "/robots/") && strings.Count(path, "/") == 6:
+	case strings.HasPrefix(path, "/api/v2.0/robots/"):
 		handleRobotByID(w, r)
 
 	default:

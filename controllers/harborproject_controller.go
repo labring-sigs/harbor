@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -437,5 +438,5 @@ func setCondition(conditions *[]metav1.Condition, condType string, status metav1
 func shortID(prefix string) string {
 	b := make([]byte, 4)
 	_, _ = rand.Read(b)
-	return prefix + "-" + base64.RawURLEncoding.EncodeToString(b)
+	return prefix + "-" + hex.EncodeToString(b)
 }
