@@ -139,6 +139,15 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 			_ = r.Status().Update(ctx, project)
 			return ctrl.Result{}, fmt.Errorf("failed to update harbor project: %w", err)
 		}
+		// Update the project storage quota separately. In Harbor v2.x,
+		// PUT /api/v2.0/projects/{id} does NOT update the quota; it must
+		// be updated via PUT /api/v2.0/quotas/{id}. The quota ID equals
+		// the project ID.
+		if err := r.HarborClient.UpdateProjectQuota(ctx, hbProject.ProjectID, project.Spec.StorageLimit); err != nil {
+			project.Status.Phase = v1.HarborPhaseFailed
+			_ = r.Status().Update(ctx, project)
+			return ctrl.Result{}, fmt.Errorf("failed to update harbor project quota: %w", err)
+		}
 		// Capture the previous Harbor project ID before overwriting it,
 		// so we can detect if Harbor deleted and recreated the project.
 		prevHarborProjectID := project.Status.HarborProjectID

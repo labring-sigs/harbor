@@ -205,6 +205,11 @@ func (m *mockIntegrationHarborClient) UpdateProject(_ context.Context, projectID
 	return &harbor.ErrNotFound{Resource: "project", ID: projectID}
 }
 
+func (m *mockIntegrationHarborClient) UpdateProjectQuota(_ context.Context, projectID int64, storageLimit int64) error {
+	// In-memory mock: acknowledge the quota update without persisting
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Integration tests
 // ---------------------------------------------------------------------------
