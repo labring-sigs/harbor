@@ -139,14 +139,18 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 			_ = r.Status().Update(ctx, project)
 			return ctrl.Result{}, fmt.Errorf("failed to update harbor project: %w", err)
 		}
+		// Capture the previous Harbor project ID before overwriting it,
+		// so we can detect if Harbor deleted and recreated the project.
+		prevHarborProjectID := project.Status.HarborProjectID
 		project.Status.HarborProjectID = hbProject.ProjectID
 		project.Status.HarborProjectName = hbProject.Name
 
-		// If the project was previously ready, has a robot account, and the
-		// full-flow fields (namespaceRefs, robotPermissions) haven't changed,
-		// skip robot/secret recreation. This handles the common case where a
-		// user changes public/autoScan/storageLimit on an existing project.
-		if wasReady && project.Status.RobotID > 0 && project.Status.LastSpecHash == computeSpecHash(projectName, project.Spec.NamespaceRefs, project.Spec.RobotPermissions) {
+		// If the project was previously ready, has a robot account, the
+		// full-flow fields haven't changed, and the Harbor project identity
+		// is unchanged, skip robot/secret recreation. This handles the common
+		// case where a user changes public/autoScan/storageLimit on an existing
+		// project.
+		if wasReady && project.Status.RobotID > 0 && project.Status.LastSpecHash == computeSpecHash(projectName, project.Spec.NamespaceRefs, project.Spec.RobotPermissions) && prevHarborProjectID == hbProject.ProjectID {
 			project.Status.Phase = v1.HarborPhaseReady
 			project.Status.ObservedGeneration = project.Generation
 			logger.Info("HarborProject metadata synced to Harbor",
