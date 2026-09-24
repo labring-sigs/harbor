@@ -192,6 +192,19 @@ func (m *mockIntegrationHarborClient) DeleteProject(_ context.Context, projectID
 	return nil
 }
 
+func (m *mockIntegrationHarborClient) UpdateProject(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+	if m.projects == nil {
+		return &harbor.ErrNotFound{Resource: "project", ID: projectID}
+	}
+	for _, p := range m.projects {
+		if p.ProjectID == projectID {
+			p.Public = spec.Public
+			return nil
+		}
+	}
+	return &harbor.ErrNotFound{Resource: "project", ID: projectID}
+}
+
 // ---------------------------------------------------------------------------
 // Integration tests
 // ---------------------------------------------------------------------------

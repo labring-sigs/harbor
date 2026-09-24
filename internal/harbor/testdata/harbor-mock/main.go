@@ -128,6 +128,30 @@ func handleProjectByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch r.Method {
+	case http.MethodPut:
+		// PUT /api/v2.0/projects/{id} — update project metadata
+		var req struct {
+			StorageLimit int64                  `json:"storage_limit"`
+			Metadata     map[string]interface{} `json:"metadata"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+			return
+		}
+
+		globalStore.mu.Lock()
+		defer globalStore.mu.Unlock()
+
+		for _, p := range globalStore.projects {
+			if p.ID == projectID {
+				// In the mock we don't store metadata beyond the project name/ID,
+				// but we acknowledge the update as successful.
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+		}
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+
 	case http.MethodDelete:
 		globalStore.mu.Lock()
 		defer globalStore.mu.Unlock()

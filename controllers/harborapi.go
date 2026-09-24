@@ -12,6 +12,7 @@ import (
 type HarborAPIClient interface {
 	GetProjectByName(ctx context.Context, name string) (*harbor.Project, error)
 	CreateProject(ctx context.Context, spec harbor.ProjectSpec) (int64, error)
+	UpdateProject(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error
 	CreateRobot(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error)
 	DeleteProjectRobot(ctx context.Context, projectID, robotID int64) error
 	DeleteProject(ctx context.Context, projectID int64) error

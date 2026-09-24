@@ -123,6 +123,16 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 		project.Status.HarborProjectID = projectID
 		project.Status.HarborProjectName = projectName
 	} else {
+		// Update existing project properties to match spec
+		if err := r.HarborClient.UpdateProject(ctx, hbProject.ProjectID, harbor.ProjectSpec{
+			Public:       project.Spec.Public,
+			StorageLimit: project.Spec.StorageLimit,
+			AutoScan:     project.Spec.AutoScan,
+		}); err != nil {
+			project.Status.Phase = v1.HarborPhaseFailed
+			_ = r.Status().Update(ctx, project)
+			return ctrl.Result{}, fmt.Errorf("failed to update harbor project: %w", err)
+		}
 		project.Status.HarborProjectID = hbProject.ProjectID
 		project.Status.HarborProjectName = hbProject.Name
 	}

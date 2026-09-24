@@ -107,6 +107,28 @@ func (c *Client) DeleteProject(ctx context.Context, projectID int64) error {
 	return nil
 }
 
+// UpdateProject updates an existing Harbor project's properties (public, auto_scan, storage_limit)
+func (c *Client) UpdateProject(ctx context.Context, projectID int64, spec ProjectSpec) error {
+	body := map[string]interface{}{
+		"storage_limit": spec.StorageLimit,
+		"metadata": map[string]interface{}{
+			"public":    strconv.FormatBool(spec.Public),
+			"auto_scan": strconv.FormatBool(spec.AutoScan),
+		},
+	}
+	resp, err := c.put(ctx, fmt.Sprintf("/api/v2.0/projects/%d", projectID), body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return &ErrAPIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+	}
+	return nil
+}
+
 // --- Robot Account API ---
 
 // CreateRobot creates a robot account for a project and returns the full RobotAccount (ID + Name + Token/Secret).
@@ -215,4 +237,8 @@ func (c *Client) post(ctx context.Context, path string, body interface{}) (*http
 
 func (c *Client) delete(ctx context.Context, path string) (*http.Response, error) {
 	return c.doRequest(ctx, http.MethodDelete, path, nil)
+}
+
+func (c *Client) put(ctx context.Context, path string, body interface{}) (*http.Response, error) {
+	return c.doRequest(ctx, http.MethodPut, path, body)
 }

@@ -25,6 +25,7 @@ import (
 type harborClient interface {
 	GetProjectByName(ctx context.Context, name string) (*harbor.Project, error)
 	CreateProject(ctx context.Context, spec harbor.ProjectSpec) (int64, error)
+	UpdateProject(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error
 	CreateRobot(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error)
 	DeleteProjectRobot(ctx context.Context, projectID, robotID int64) error
 	DeleteProject(ctx context.Context, projectID int64) error
@@ -37,6 +38,7 @@ var _ harborClient = (*harbor.Client)(nil)
 type mockHarborClient struct {
 	getProjectByNameFn  func(ctx context.Context, name string) (*harbor.Project, error)
 	createProjectFn     func(ctx context.Context, spec harbor.ProjectSpec) (int64, error)
+	updateProjectFn     func(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error
 	createRobotFn       func(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error)
 	deleteProjectRobotFn func(ctx context.Context, projectID, robotID int64) error
 	deleteProjectFn     func(ctx context.Context, projectID int64) error
@@ -47,6 +49,9 @@ func (m *mockHarborClient) GetProjectByName(ctx context.Context, name string) (*
 }
 func (m *mockHarborClient) CreateProject(ctx context.Context, spec harbor.ProjectSpec) (int64, error) {
 	return m.createProjectFn(ctx, spec)
+}
+func (m *mockHarborClient) UpdateProject(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error {
+	return m.updateProjectFn(ctx, projectID, spec)
 }
 func (m *mockHarborClient) CreateRobot(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
 	return m.createRobotFn(ctx, projectID, spec)
@@ -194,6 +199,10 @@ func TestReconcile_CreateProject_AlreadyExistsInHarbor(t *testing.T) {
 		createProjectFn: func(_ context.Context, spec harbor.ProjectSpec) (int64, error) {
 			t.Fatal("CreateProject should not be called when project already exists")
 			return 0, nil
+		},
+		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			// Project already exists; just acknowledge the update
+			return nil
 		},
 		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
 			if projectID != 99 {
@@ -489,6 +498,89 @@ func TestBuildDockerConfigSecret_NamespaceRefs(t *testing.T) {
 	}
 	_ = secret
 }
+
+func TestReconcile_UpdateProjectProperties(t *testing.T) {
+	project := fakeProject("update-test", string(v1.HarborPhaseReady), true)
+	project.Generation = 1
+	project.Status.HarborProjectID = 42
+	project.Status.HarborProjectName = "hp-update-test"
+	project.Status.ObservedGeneration = 0 // force reconcile even though phase is Ready
+	project.Spec.Public = true
+	project.Spec.AutoScan = true
+	project.Spec.StorageLimit = 100 * 1024 * 1024 * 1024 // 100GB
+
+	updateCalled := false
+	var capturedProjectID int64
+	var capturedSpec harbor.ProjectSpec
+
+	mock := &mockHarborClient{
+		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
+			return &harbor.Project{
+				ProjectID: 42,
+				Name:      "hp-update-test",
+				Public:    false, // existing project has different value
+			}, nil
+		},
+		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			updateCalled = true
+			capturedProjectID = projectID
+			capturedSpec = spec
+			return nil
+		},
+		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
+			return &harbor.RobotAccount{
+				ID:    200,
+				Name:  "robot-update-test",
+				Token: "new-token",
+			}, nil
+		},
+	}
+
+	r := newTestReconciler(mock, project)
+
+	// First reconcile: project exists, so it should call UpdateProject
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "update-test"}}
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Requeue {
+		t.Log("Reconcile requested requeue (expected if finalizer was added)")
+	}
+
+	if !updateCalled {
+		t.Error("expected UpdateProject to be called when project already exists")
+	}
+	if capturedProjectID != 42 {
+		t.Errorf("expected project ID 42, got %d", capturedProjectID)
+	}
+	if capturedSpec.Public != true {
+		t.Errorf("expected Public=true, got %v", capturedSpec.Public)
+	}
+	if capturedSpec.AutoScan != true {
+		t.Errorf("expected AutoScan=true, got %v", capturedSpec.AutoScan)
+	}
+	if capturedSpec.StorageLimit != 100*1024*1024*1024 {
+		t.Errorf("expected StorageLimit=107374182400, got %d", capturedSpec.StorageLimit)
+	}
+
+	// Second reconcile: project already ready with matching generation => should not call UpdateProject
+	updateCalled = false
+	project.Status.ObservedGeneration = project.Generation
+	_ = r.Status().Update(context.Background(), project)
+
+	result2, err2 := r.Reconcile(context.Background(), req)
+	if err2 != nil {
+		t.Fatalf("second reconcile error: %v", err2)
+	}
+	if result2.Requeue {
+		t.Log("Second reconcile requested requeue")
+	}
+	if updateCalled {
+		t.Error("expected UpdateProject NOT to be called when generation matches observed generation")
+	}
+}
+
 
 // ---------------------------------------------------------------------------
 // Helper tests
