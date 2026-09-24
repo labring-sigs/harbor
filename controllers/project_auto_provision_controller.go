@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	v1 "github.com/dinoallo/labring-sigs-harbor/api/v1"
@@ -50,6 +51,10 @@ type ProjectAutoProvisionReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
 	OwnerLabelKey string
+
+	// MaxConcurrentReconciles is the maximum number of concurrent reconciles
+	// for the ProjectAutoProvision controller. Defaults to 1.
+	MaxConcurrentReconciles int
 
 	// DefaultStorageLimitBytes is the storage limit (in bytes) assigned to
 	// auto-provisioned HarborProject CRs when the namespace does not carry
@@ -183,6 +188,7 @@ func (r *ProjectAutoProvisionReconciler) SetupWithManager(mgr ctrl.Manager) erro
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Namespace{}).
 		Named("project-auto-provision").
+		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
 		Complete(r)
 }
 

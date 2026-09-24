@@ -46,6 +46,10 @@ spec:
             - --owner-label-key={{ .Values.autoProvision.ownerLabelKey }}
             - --default-storage-limit={{ .Values.autoProvision.defaultStorageLimit }}
             {{- end }}
+            - --harbor-project-concurrency={{ .Values.harborProjectConcurrency }}
+            - --project-auto-provision-concurrency={{ .Values.projectAutoProvisionConcurrency }}
+            - --kube-api-qps={{ .Values.kubeAPI.qps }}
+            - --kube-api-burst={{ .Values.kubeAPI.burst }}
             {{- range .Values.controllerArgs }}
             {{- if and $.Values.leaderElection.enabled (eq . "--leader-elect") }}{{- else }}
             - {{ . }}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -41,6 +42,10 @@ func main() {
 	var enableProjectAutoProvision bool
 	var ownerLabelKey string
 	var defaultStorageLimit int64
+	var harborProjectConcurrency int
+	var projectAutoProvisionConcurrency int
+	var kubeAPIQPS float64
+	var kubeAPIBurst int
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -53,6 +58,14 @@ func main() {
 		"Label key on namespaces used to determine the owner for auto-provisioned HarborProject CRs.")
 	flag.Int64Var(&defaultStorageLimit, "default-storage-limit", defaultStorageLimitFlagDefault,
 		"Default storage limit in bytes for auto-provisioned HarborProjects. Use -1 for unlimited.")
+	flag.IntVar(&harborProjectConcurrency, "harbor-project-concurrency", 10,
+		"Max concurrent reconciles for the HarborProject controller.")
+	flag.IntVar(&projectAutoProvisionConcurrency, "project-auto-provision-concurrency", 10,
+		"Max concurrent reconciles for the ProjectAutoProvision controller.")
+	flag.Float64Var(&kubeAPIQPS, "kube-api-qps", 5.0,
+		"Kubernetes API client QPS.")
+	flag.IntVar(&kubeAPIBurst, "kube-api-burst", 10,
+		"Kubernetes API client burst.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -61,7 +74,12 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	// Build custom rest.Config with configurable QPS/Burst
+	cfg := ctrl.GetConfigOrDie()
+	cfg.QPS = float32(kubeAPIQPS)
+	cfg.Burst = kubeAPIBurst
+
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
@@ -92,10 +110,11 @@ func main() {
 	harborClient := harbor.NewClient(harborEndpoint, harborAdminUser, harborAdminPass)
 
 	if err = (&controllers.HarborProjectReconciler{
-		Client:       mgr.GetClient(),
-		Scheme:       mgr.GetScheme(),
-		HarborClient: harborClient,
-		RegistryHost: registryHost,
+		Client:                  mgr.GetClient(),
+		Scheme:                  mgr.GetScheme(),
+		HarborClient:            harborClient,
+		RegistryHost:            registryHost,
+		MaxConcurrentReconciles: harborProjectConcurrency,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "HarborProject")
 		os.Exit(1)
@@ -105,12 +124,14 @@ func main() {
 		setupLog.Info("project auto-provision enabled",
 			"ownerLabelKey", ownerLabelKey,
 			"defaultStorageLimit", defaultStorageLimit,
+			"maxConcurrentReconciles", projectAutoProvisionConcurrency,
 		)
 		if err = (&controllers.ProjectAutoProvisionReconciler{
 			Client:                   mgr.GetClient(),
 			Scheme:                   mgr.GetScheme(),
 			OwnerLabelKey:            ownerLabelKey,
 			DefaultStorageLimitBytes: defaultStorageLimit,
+			MaxConcurrentReconciles:  projectAutoProvisionConcurrency,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "ProjectAutoProvision")
 			os.Exit(1)
@@ -126,7 +147,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	setupLog.Info("starting manager")
+	setupLog.Info("starting manager",
+		"harborProjectConcurrency", harborProjectConcurrency,
+		"projectAutoProvisionConcurrency", projectAutoProvisionConcurrency,
+		"kubeAPIQPS", fmt.Sprintf("%.1f", kubeAPIQPS),
+		"kubeAPIBurst", kubeAPIBurst,
+	)
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)

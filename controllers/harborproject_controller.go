@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -41,6 +42,10 @@ type HarborProjectReconciler struct {
 	Scheme       *runtime.Scheme
 	HarborClient HarborAPIClient
 	RegistryHost string // e.g. harbor.sealos.example.com
+
+	// MaxConcurrentReconciles is the maximum number of concurrent reconciles
+	// for the HarborProject controller. Defaults to 1.
+	MaxConcurrentReconciles int
 }
 
 // +kubebuilder:rbac:groups=harbor.sealos.io,resources=harborprojects,verbs=get;list;watch;update;patch
@@ -334,6 +339,7 @@ func (r *HarborProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&corev1.Secret{},
 			handler.TypedEnqueueRequestsFromMapFunc(r.mapSecretToProject),
 		).
+		WithOptions(controller.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}).
 		Complete(r)
 }
 
