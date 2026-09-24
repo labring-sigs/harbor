@@ -652,7 +652,7 @@ func TestE2E_HarborProjectLifecycle(t *testing.T) {
 	}
 
 	// Verify the OCI image artifacts were cleaned up by the mock (project cascade)
-	ociAdmin := newOCIClient(mockEndpoint, "admin", "harbor12345")
+	ociAdmin = newOCIClient(mockEndpoint, "admin", "harbor12345")
 	if _, _, err := ociAdmin.pullManifest(envCtx, projectName+"/my-image", "latest"); err == nil {
 		t.Errorf("expected manifest to be deleted after project removal, but pull succeeded")
 	} else {
