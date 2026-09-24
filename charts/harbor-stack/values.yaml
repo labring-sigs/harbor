@@ -20,6 +20,12 @@ harbor:
   # Must match harbor.harborAdminPassword in the harbor subchart values.
   adminPassword: ""
 
+  # Disable the subchart's own admin-password-secret template because
+  # this umbrella chart creates the Secret itself (see
+  # templates/admin-password-secret.yaml) with the same lookup+randAlphaNum
+  # pattern.
+  createAdminPasswordSecret: false
+
   # These values are forwarded to the harbor subchart,
   # which in turn forwards them to the official harbor-helm subchart.
   # See charts/harbor/values.yaml for all available options.

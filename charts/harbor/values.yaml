@@ -22,11 +22,22 @@
 # Set to false to disable deploying Harbor altogether
 enabled: true
 
+# Create a Kubernetes Secret for the admin password with a random value.
+# When enabled, the chart generates a random 16-character password on
+# first install and preserves it across upgrades using lookup.
+# Set to false when the parent chart (e.g. harbor-stack) manages its own
+# admin password Secret.
+createAdminPasswordSecret: true
+
 # ── Subchart overrides (these are forwarded to the official harbor-helm) ──
 harbor:
-  # ---- Initial admin password (default: "Harbor12345") ----
-  # Change this immediately after deployment!
-  harborAdminPassword: "Harbor12345"
+  # ---- Admin password ----
+  # Use the Secret created by admin-password-secret.yaml instead of a
+  # hardcoded value.  The password is randomly generated on first install
+  # and preserved across upgrades.
+  harborAdminPassword: ""
+  existingSecretAdminPassword: "harbor-admin-password"
+  existingSecretAdminPasswordKey: "password"
 
   # ---- Networking ----
   expose:

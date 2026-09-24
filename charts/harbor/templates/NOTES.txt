@@ -3,31 +3,30 @@ Minimal Harbor {{ .Chart.AppVersion }} deployed.
 Components enabled:  Core · Registry · JobService · Database · Redis
 Components disabled: Portal · Trivy · Notary · ChartMuseum · Exporter
 
-1. After the deployment is ready, change the admin password:
+The chart automatically creates the admin password Secret
+from a randomly generated password (16-character alphanumeric).
+You can set a custom password before installing:
 
-   kubectl -n {{ .Release.Namespace }} exec -it \
-       deploy/harbor-core -- \
-       harbor password --set-init-password
+  helm upgrade --set harbor.harborAdminPassword=<your-password>
 
-2. Verify Harbor is reachable:
+1. Verify Harbor is reachable:
 
    kubectl -n {{ .Release.Namespace }} get svc harbor
    kubectl -n {{ .Release.Namespace }} port-forward svc/harbor 8080:80
 
    Then visit http://localhost:8080/api/v2.0/health
 
-3. If you are deploying the Harbor Controller alongside, ensure the
+2. If you are deploying the Harbor Controller alongside, ensure the
    controller's HARBOR_ENDPOINT points to this Harbor service:
 
    http://harbor.{{ .Release.Namespace }}.svc:80
 
-4. To check pod status:
+3. To check pod status:
 
    kubectl -n {{ .Release.Namespace }} get pods \
        -l app.kubernetes.io/name=harbor
 
 For production, consider:
    - Configuring an Ingress with a valid TLS certificate
-   - Changing the default admin password
    - Setting up external database/redis for HA
    - Adjusting persistence.size values
