@@ -183,6 +183,7 @@ func TestAutoProvision_Namespace_Deleting_DoesNothing(t *testing.T) {
 			Name:              "ns-4",
 			Labels:            map[string]string{ownerLabelKey: "user-abc"},
 			UID:               types.UID("ns-4-uid"),
+			Finalizers:        []string{"harbor.sealos.io/cleanup"},
 			DeletionTimestamp: &now,
 		},
 	}
