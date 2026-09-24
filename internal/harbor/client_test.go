@@ -295,6 +295,64 @@ func TestUpdateProject_APIError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Quota API tests
+// ---------------------------------------------------------------------------
+
+func TestUpdateProjectQuota_Success(t *testing.T) {
+	client := newMockClient(func(req *http.Request) (int, string) {
+		if req.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", req.Method)
+		}
+		if req.URL.Path != "/api/v2.0/quotas/5" {
+			t.Errorf("expected /api/v2.0/quotas/5, got %s", req.URL.Path)
+		}
+
+		// Verify body
+		bodyBytes, _ := io.ReadAll(req.Body)
+		var body map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &body); err != nil {
+			t.Fatal(err)
+		}
+		hard, ok := body["hard"].(map[string]interface{})
+		if !ok {
+			t.Fatal("expected hard field in body")
+		}
+		storage, ok := hard["storage"].(float64)
+		if !ok {
+			t.Fatal("expected storage in hard field")
+		}
+		if int64(storage) != 2097152 {
+			t.Errorf("expected storage 2097152, got %v", storage)
+		}
+
+		return http.StatusOK, ""
+	})
+
+	err := client.UpdateProjectQuota(context.Background(), 5, 2097152)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestUpdateProjectQuota_Error(t *testing.T) {
+	client := newMockClient(func(req *http.Request) (int, string) {
+		return http.StatusBadRequest, `{"errors":[{"code":"BAD_REQUEST","message":"invalid quota"}]}`
+	})
+
+	err := client.UpdateProjectQuota(context.Background(), 5, 2097152)
+	if err == nil {
+		t.Fatal("expected error for bad request")
+	}
+	apiErr, ok := err.(*ErrAPIError)
+	if !ok {
+		t.Fatalf("expected ErrAPIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", apiErr.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Robot Account API tests
 // ---------------------------------------------------------------------------
 

@@ -26,6 +26,7 @@ type harborClient interface {
 	GetProjectByName(ctx context.Context, name string) (*harbor.Project, error)
 	CreateProject(ctx context.Context, spec harbor.ProjectSpec) (int64, error)
 	UpdateProject(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error
+	UpdateProjectQuota(ctx context.Context, projectID int64, storageLimit int64) error
 	CreateRobot(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error)
 	DeleteProjectRobot(ctx context.Context, projectID, robotID int64) error
 	DeleteProject(ctx context.Context, projectID int64) error
@@ -36,12 +37,13 @@ type harborClient interface {
 var _ harborClient = (*harbor.Client)(nil)
 
 type mockHarborClient struct {
-	getProjectByNameFn  func(ctx context.Context, name string) (*harbor.Project, error)
-	createProjectFn     func(ctx context.Context, spec harbor.ProjectSpec) (int64, error)
-	updateProjectFn     func(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error
-	createRobotFn       func(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error)
-	deleteProjectRobotFn func(ctx context.Context, projectID, robotID int64) error
-	deleteProjectFn     func(ctx context.Context, projectID int64) error
+	getProjectByNameFn    func(ctx context.Context, name string) (*harbor.Project, error)
+	createProjectFn       func(ctx context.Context, spec harbor.ProjectSpec) (int64, error)
+	updateProjectFn       func(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error
+	updateProjectQuotaFn  func(ctx context.Context, projectID int64, storageLimit int64) error
+	createRobotFn         func(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error)
+	deleteProjectRobotFn  func(ctx context.Context, projectID, robotID int64) error
+	deleteProjectFn       func(ctx context.Context, projectID int64) error
 }
 
 func (m *mockHarborClient) GetProjectByName(ctx context.Context, name string) (*harbor.Project, error) {
@@ -52,6 +54,9 @@ func (m *mockHarborClient) CreateProject(ctx context.Context, spec harbor.Projec
 }
 func (m *mockHarborClient) UpdateProject(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error {
 	return m.updateProjectFn(ctx, projectID, spec)
+}
+func (m *mockHarborClient) UpdateProjectQuota(ctx context.Context, projectID int64, storageLimit int64) error {
+	return m.updateProjectQuotaFn(ctx, projectID, storageLimit)
 }
 func (m *mockHarborClient) CreateRobot(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
 	return m.createRobotFn(ctx, projectID, spec)
@@ -202,6 +207,9 @@ func TestReconcile_CreateProject_AlreadyExistsInHarbor(t *testing.T) {
 		},
 		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
 			// Project already exists; just acknowledge the update
+			return nil
+		},
+		updateProjectQuotaFn: func(_ context.Context, projectID int64, storageLimit int64) error {
 			return nil
 		},
 		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
@@ -512,6 +520,9 @@ func TestReconcile_UpdateProjectProperties(t *testing.T) {
 	updateCalled := false
 	var capturedProjectID int64
 	var capturedSpec harbor.ProjectSpec
+	quotaCalled := false
+	var capturedQuotaProjectID int64
+	var capturedStorageLimit int64
 
 	mock := &mockHarborClient{
 		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
@@ -525,6 +536,12 @@ func TestReconcile_UpdateProjectProperties(t *testing.T) {
 			updateCalled = true
 			capturedProjectID = projectID
 			capturedSpec = spec
+			return nil
+		},
+		updateProjectQuotaFn: func(_ context.Context, projectID int64, storageLimit int64) error {
+			quotaCalled = true
+			capturedQuotaProjectID = projectID
+			capturedStorageLimit = storageLimit
 			return nil
 		},
 		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
@@ -565,6 +582,15 @@ func TestReconcile_UpdateProjectProperties(t *testing.T) {
 	}
 	if capturedSpec.StorageLimit != 100*1024*1024*1024 {
 		t.Errorf("expected StorageLimit=107374182400, got %d", capturedSpec.StorageLimit)
+	}
+	if !quotaCalled {
+		t.Error("expected UpdateProjectQuota to be called when project already exists")
+	}
+	if capturedQuotaProjectID != 42 {
+		t.Errorf("expected quota project ID 42, got %d", capturedQuotaProjectID)
+	}
+	if capturedStorageLimit != 100*1024*1024*1024 {
+		t.Errorf("expected storage limit 107374182400, got %d", capturedStorageLimit)
 	}
 
 	// Second reconcile: project already ready with matching generation => should not call UpdateProject
@@ -614,6 +640,9 @@ func TestReconcile_UpdatePublicAutoScan_NoRobotRotation(t *testing.T) {
 			if spec.AutoScan != true {
 				t.Errorf("expected AutoScan=true, got %v", spec.AutoScan)
 			}
+			return nil
+		},
+		updateProjectQuotaFn: func(_ context.Context, projectID int64, storageLimit int64) error {
 			return nil
 		},
 		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
@@ -681,6 +710,9 @@ func TestReconcile_UpdatePublicAutoScan_NotReadyStillRotates(t *testing.T) {
 		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
 			return nil
 		},
+		updateProjectQuotaFn: func(_ context.Context, projectID int64, storageLimit int64) error {
+			return nil
+		},
 		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
 			createRobotCalled = true
 			return &harbor.RobotAccount{ID: 99, Name: "robot-new", Token: "tok"}, nil
@@ -733,6 +765,9 @@ func TestReconcile_UpdatePublicAutoScan_HashMismatchStillRotates(t *testing.T) {
 		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
 			return nil
 		},
+		updateProjectQuotaFn: func(_ context.Context, projectID int64, storageLimit int64) error {
+			return nil
+		},
 		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
 			createRobotCalled = true
 			return &harbor.RobotAccount{ID: 99, Name: "robot-new", Token: "tok"}, nil
@@ -781,6 +816,9 @@ func TestReconcile_FastPath_ProjectIDChanged(t *testing.T) {
 			return &harbor.Project{ProjectID: 99, Name: "hp-project-id-change"}, nil
 		},
 		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			return nil
+		},
+		updateProjectQuotaFn: func(_ context.Context, projectID int64, storageLimit int64) error {
 			return nil
 		},
 		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
@@ -841,6 +879,9 @@ func TestReconcile_ExistingSecretsUpdated(t *testing.T) {
 			return &harbor.Project{ProjectID: 42, Name: "hp-existing-secret"}, nil
 		},
 		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			return nil
+		},
+		updateProjectQuotaFn: func(_ context.Context, projectID int64, storageLimit int64) error {
 			return nil
 		},
 		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {

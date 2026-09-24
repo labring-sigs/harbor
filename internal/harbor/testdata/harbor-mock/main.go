@@ -604,6 +604,15 @@ func mux(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/api/v2.0/robots/"):
 		handleRobotByID(w, r)
 
+	case strings.HasPrefix(path, "/api/v2.0/quotas/"):
+		// PUT /api/v2.0/quotas/{id} — update project quota
+		if r.Method != http.MethodPut {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+			return
+		}
+		// In the mock we don't persist quota, just acknowledge the update.
+		w.WriteHeader(http.StatusOK)
+
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}

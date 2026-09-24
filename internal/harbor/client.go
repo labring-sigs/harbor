@@ -130,6 +130,28 @@ func (c *Client) UpdateProject(ctx context.Context, projectID int64, spec Projec
 	return nil
 }
 
+// UpdateProjectQuota updates the storage quota for a Harbor project.
+// In Harbor v2.x, the project quota must be updated via a separate endpoint
+// from the project properties. The quota ID equals the project ID.
+func (c *Client) UpdateProjectQuota(ctx context.Context, projectID int64, storageLimit int64) error {
+	body := map[string]interface{}{
+		"hard": map[string]interface{}{
+			"storage": storageLimit,
+		},
+	}
+	resp, err := c.put(ctx, fmt.Sprintf("/api/v2.0/quotas/%d", projectID), body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return &ErrAPIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+	}
+	return nil
+}
+
 // --- Robot Account API ---
 
 // CreateRobot creates a robot account for a project and returns the full RobotAccount (ID + Name + Token/Secret).
