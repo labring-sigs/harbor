@@ -1151,7 +1151,7 @@ harbor_controller_operation_total{operation="create_project", status="success"}
 - [x] Reconciler core logic (create Project → Robot → distribute Secrets via namespaceRefs; reverse cleanup on delete)
 - [x] Robot Token refresh via `harbor.sealos.io/refresh-token` annotation (create new → update secrets → delete old)
 - [x] RBAC + deployment configuration (ServiceAccount, ClusterRole, Deployment)
-- [ ] End-to-end testing (create → push → pull → delete full workflow)
+- [x] End-to-end testing (create → push → pull → delete full workflow)
 - [x] Project Auto-Provision controller (auto-create HarborProject CR from Namespace)
 
 ### Phase 2: Metering & Billing

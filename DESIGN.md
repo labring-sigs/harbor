@@ -1157,7 +1157,7 @@ harbor_controller_operation_total{operation="create_project", status="success"}
 - [x] Reconciler 核心逻辑（创建 Project → Robot → 遍历 namespaceRefs 分发 Secret；删除时反向清理）
 - [x] Robot Token 刷新：通过 `harbor.sealos.io/refresh-token` 注解触发（创建新 → 更新 Secret → 删除旧）
 - [x] RBAC + 部署配置（ServiceAccount、ClusterRole、Deployment）
-- [ ] 端到端测试（创建→推送→拉取→删除全流程）
+- [x] 端到端测试（创建→推送→拉取→删除全流程）
 - [x] Project Auto-Provision 控制器（Namespace 自动创建 HarborProject CR）
 
 ### Phase 2: Metering & Billing
