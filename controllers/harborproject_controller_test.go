@@ -592,6 +592,7 @@ func TestReconcile_UpdatePublicAutoScan_NoRobotRotation(t *testing.T) {
 	project.Status.HarborProjectName = "hp-meta-sync"
 	project.Status.RobotID = 88       // already has a robot
 	project.Status.ObservedGeneration = 0 // stale, force reconcile
+	project.Status.LastSpecHash = "5f61356aec8fca4f" // matches default namespaceRefs+robotPermissions from fakeProject
 	project.Spec.Public = true
 	project.Spec.AutoScan = true
 
@@ -667,6 +668,7 @@ func TestReconcile_UpdatePublicAutoScan_NotReadyStillRotates(t *testing.T) {
 	project.Status.HarborProjectName = "hp-meta-sync-recover"
 	project.Status.RobotID = 88       // has a robot from a previous attempt
 	project.Status.ObservedGeneration = 0 // stale, force reconcile
+	project.Status.LastSpecHash = "5f61356aec8fca4f" // hash matches, but wasReady is false so still goes through full flow
 	project.Spec.Public = true
 	project.Spec.AutoScan = true
 
@@ -689,9 +691,6 @@ func TestReconcile_UpdatePublicAutoScan_NotReadyStillRotates(t *testing.T) {
 	}
 
 	r := newTestReconciler(mock, project)
-
-	// Add finalizer so the reconciler doesn't stop at the finalizer step
-	project.Finalizers = []string{harborFinalizer}
 
 	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "meta-sync-recover"}}
 

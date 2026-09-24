@@ -68,7 +68,12 @@ type HarborProjectStatus struct {
 	RobotID            int64              `json:"robotID,omitempty"`
 	Owner              string             `json:"owner,omitempty"`
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
-	Conditions         []metav1.Condition `json:"conditions,omitempty"`
+	// LastSpecHash is a hash of namespaceRefs and robotPermissions from the last
+	// successful full reconciliation. When the current spec matches this hash,
+	// only metadata changes (public/autoScan/storageLimit) have occurred.
+	// +optional
+	LastSpecHash string              `json:"lastSpecHash,omitempty"`
+	Conditions   []metav1.Condition  `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -7,7 +7,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"net/http"
+	"sort"
 
 	stderrors "errors"
 	corev1 "k8s.io/api/core/v1"
@@ -139,9 +141,11 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 		project.Status.HarborProjectID = hbProject.ProjectID
 		project.Status.HarborProjectName = hbProject.Name
 
-		// If we already have a robot account, skip robot/secret recreation.
-		// The Harbor project metadata (public/autoScan/storageLimit) has already been synced.
-		if wasReady && project.Status.RobotID > 0 {
+		// If the project was previously ready, has a robot account, and the
+		// full-flow fields (namespaceRefs, robotPermissions) haven't changed,
+		// skip robot/secret recreation. This handles the common case where a
+		// user changes public/autoScan/storageLimit on an existing project.
+		if wasReady && project.Status.RobotID > 0 && project.Status.LastSpecHash == computeSpecHash(project.Spec.NamespaceRefs, project.Spec.RobotPermissions) {
 			project.Status.Phase = v1.HarborPhaseReady
 			project.Status.ObservedGeneration = project.Generation
 			logger.Info("HarborProject metadata synced to Harbor",
@@ -207,6 +211,10 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 			logger.Error(err, "failed to delete previous robot (continuing)", "robotID", oldRobotID)
 		}
 	}
+
+	// Compute and store the hash of full-flow fields for fast-path detection
+	// on subsequent reconciliations.
+	project.Status.LastSpecHash = computeSpecHash(project.Spec.NamespaceRefs, project.Spec.RobotPermissions)
 
 	// Mark as Ready
 	project.Status.Phase = v1.HarborPhaseReady
@@ -456,6 +464,29 @@ func setCondition(conditions *[]metav1.Condition, condType string, status metav1
 			Message:            message,
 		})
 	}
+}
+
+// computeSpecHash returns a deterministic hash of the fields that require full
+// reconciliation (namespaceRefs, robotPermissions). When this hash matches the
+// stored value in project.Status.LastSpecHash, only metadata fields
+// (public/autoScan/storageLimit) have changed and the fast path can be taken.
+func computeSpecHash(namespaceRefs []string, robotPermissions []v1.RobotPermission) string {
+	h := fnv.New64a()
+	// Sort for deterministic ordering
+	sorted := append([]string{}, namespaceRefs...)
+	sort.Strings(sorted)
+	for _, ns := range sorted {
+		h.Write([]byte(ns))
+		h.Write([]byte{0})
+	}
+	// Sort robot permissions by action
+	perms := append([]v1.RobotPermission{}, robotPermissions...)
+	sort.Slice(perms, func(i, j int) bool { return perms[i].Action < perms[j].Action })
+	for _, p := range perms {
+		h.Write([]byte(p.Action))
+		h.Write([]byte{0})
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 // shortID generates a short random ID for robot account naming
