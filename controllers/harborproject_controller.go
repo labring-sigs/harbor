@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -472,25 +473,31 @@ func setCondition(conditions *[]metav1.Condition, condType string, status metav1
 // (public/autoScan/storageLimit) have changed and the fast path can be taken.
 func computeSpecHash(projectName string, namespaceRefs []string, robotPermissions []v1.RobotPermission) string {
 	h := fnv.New64a()
-	// Include the resolved project name so that changes to projectName or
-	// the auto-generated name prefix trigger full reconciliation.
+	buf := make([]byte, 4)
+	// Write projectName with length prefix so that the empty string and
+	// missing are distinct from any other input.
+	binary.LittleEndian.PutUint32(buf, uint32(len(projectName)))
+	h.Write(buf)
 	h.Write([]byte(projectName))
-	h.Write([]byte{0xff})
-	// Sort namespaceRefs for deterministic ordering
+	// Write namespaceRefs with length prefix, each item also length-prefixed.
 	sorted := append([]string{}, namespaceRefs...)
 	sort.Strings(sorted)
+	binary.LittleEndian.PutUint32(buf, uint32(len(sorted)))
+	h.Write(buf)
 	for _, ns := range sorted {
+		binary.LittleEndian.PutUint32(buf, uint32(len(ns)))
+		h.Write(buf)
 		h.Write([]byte(ns))
-		h.Write([]byte{0})
 	}
-	// Separator between namespaceRefs and robotPermissions blocks
-	h.Write([]byte{0xff})
-	// Sort robot permissions by action
+	// Write robotPermissions with length prefix, each action also length-prefixed.
 	perms := append([]v1.RobotPermission{}, robotPermissions...)
 	sort.Slice(perms, func(i, j int) bool { return perms[i].Action < perms[j].Action })
+	binary.LittleEndian.PutUint32(buf, uint32(len(perms)))
+	h.Write(buf)
 	for _, p := range perms {
+		binary.LittleEndian.PutUint32(buf, uint32(len(p.Action)))
+		h.Write(buf)
 		h.Write([]byte(p.Action))
-		h.Write([]byte{0})
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
 }

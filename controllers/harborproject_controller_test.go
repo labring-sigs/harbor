@@ -592,7 +592,7 @@ func TestReconcile_UpdatePublicAutoScan_NoRobotRotation(t *testing.T) {
 	project.Status.HarborProjectName = "hp-meta-sync"
 	project.Status.RobotID = 88       // already has a robot
 	project.Status.ObservedGeneration = 0 // stale, force reconcile
-	project.Status.LastSpecHash = "83110ed3b28e79ff" // matches default namespaceRefs+robotPermissions from fakeProject
+	project.Status.LastSpecHash = "b2f53f2fa22fd8fa" // matches default namespaceRefs+robotPermissions from fakeProject
 	project.Spec.Public = true
 	project.Spec.AutoScan = true
 
@@ -668,7 +668,7 @@ func TestReconcile_UpdatePublicAutoScan_NotReadyStillRotates(t *testing.T) {
 	project.Status.HarborProjectName = "hp-meta-sync-recover"
 	project.Status.RobotID = 88       // has a robot from a previous attempt
 	project.Status.ObservedGeneration = 0 // stale, force reconcile
-	project.Status.LastSpecHash = "5f61356aec8fca4f" // hash matches, but wasReady is false so still goes through full flow
+	project.Status.LastSpecHash = "03737f7570ba8bdb" // hash matches, but wasReady is false so still goes through full flow
 	project.Spec.Public = true
 	project.Spec.AutoScan = true
 
@@ -707,6 +707,57 @@ func TestReconcile_UpdatePublicAutoScan_NotReadyStillRotates(t *testing.T) {
 	}
 }
 
+func TestReconcile_UpdatePublicAutoScan_HashMismatchStillRotates(t *testing.T) {
+	// A Ready project with LastSpecHash set but namespaceRefs changed should still
+	// trigger full reconciliation (robot rotation), because the fast-path hash
+	// must match exactly.
+	project := fakeProject("meta-sync-hash-mismatch", string(v1.HarborPhaseReady), true)
+	project.Generation = 2
+	project.Status.HarborProjectID = 77
+	project.Status.HarborProjectName = "hp-meta-sync-hash-mismatch"
+	project.Status.RobotID = 88
+	project.Status.ObservedGeneration = 0 // stale, force reconcile
+	// LastSpecHash matches the default fakeProject spec (namespaceRefs=["ns-1"], robotPermissions=[push,pull])
+	project.Status.LastSpecHash = "b2f53f2fa22fd8fa"
+	// But now change namespaceRefs to something different
+	project.Spec.NamespaceRefs = []string{"ns-2"}
+	project.Spec.Public = true
+	project.Spec.AutoScan = true
+
+	createRobotCalled := false
+
+	mock := &mockHarborClient{
+		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
+			return &harbor.Project{ProjectID: 77, Name: "hp-meta-sync-hash-mismatch"}, nil
+		},
+		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			return nil
+		},
+		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
+			createRobotCalled = true
+			return &harbor.RobotAccount{ID: 99, Name: "robot-new", Token: "tok"}, nil
+		},
+		deleteProjectRobotFn: func(_ context.Context, projectID int64, robotID int64) error {
+			return nil
+		},
+	}
+
+	r := newTestReconciler(mock, project)
+
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "meta-sync-hash-mismatch"}}
+
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Requeue {
+		t.Fatal("did not expect requeue")
+	}
+
+	if !createRobotCalled {
+		t.Error("expected CreateRobot to be called when namespaceRefs changed (hash mismatch)")
+	}
+}
 // ---------------------------------------------------------------------------
 // Helper tests
 // ---------------------------------------------------------------------------
