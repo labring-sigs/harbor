@@ -585,6 +585,76 @@ func TestReconcile_UpdateProjectProperties(t *testing.T) {
 }
 
 
+func TestReconcile_UpdatePublicAutoScan_NoRobotRotation(t *testing.T) {
+	project := fakeProject("meta-sync", string(v1.HarborPhaseReady), true)
+	project.Generation = 2
+	project.Status.HarborProjectID = 77
+	project.Status.HarborProjectName = "hp-meta-sync"
+	project.Status.RobotID = 88       // already has a robot
+	project.Status.ObservedGeneration = 0 // stale, force reconcile
+	project.Spec.Public = true
+	project.Spec.AutoScan = true
+
+	updateProjectCalled := false
+	createRobotCalled := false
+
+	mock := &mockHarborClient{
+		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
+			return &harbor.Project{ProjectID: 77, Name: "hp-meta-sync"}, nil
+		},
+		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			updateProjectCalled = true
+			if projectID != 77 {
+				t.Errorf("expected projectID 77, got %d", projectID)
+			}
+			if spec.Public != true {
+				t.Errorf("expected Public=true, got %v", spec.Public)
+			}
+			if spec.AutoScan != true {
+				t.Errorf("expected AutoScan=true, got %v", spec.AutoScan)
+			}
+			return nil
+		},
+		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
+			createRobotCalled = true
+			return &harbor.RobotAccount{ID: 99, Name: "should-not-be-called", Token: "tok"}, nil
+		},
+	}
+
+	r := newTestReconciler(mock, project)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "meta-sync"}}
+
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Requeue {
+		t.Fatal("did not expect requeue")
+	}
+
+	if !updateProjectCalled {
+		t.Error("expected UpdateProject to be called")
+	}
+	if createRobotCalled {
+		t.Error("expected CreateRobot NOT to be called when robot already exists")
+	}
+
+	// Verify status updated correctly
+	updated := &v1.HarborProject{}
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "meta-sync"}, updated)
+	if updated.Status.Phase != v1.HarborPhaseReady {
+		t.Errorf("expected phase Ready, got %q", updated.Status.Phase)
+	}
+	if updated.Status.ObservedGeneration != project.Generation {
+		t.Errorf("expected ObservedGeneration %d, got %d", project.Generation, updated.Status.ObservedGeneration)
+	}
+	// RobotID must be preserved (not overwritten)
+	if updated.Status.RobotID != 88 {
+		t.Errorf("expected RobotID 88 (preserved), got %d", updated.Status.RobotID)
+	}
+}
+
+
 // ---------------------------------------------------------------------------
 // Helper tests
 // ---------------------------------------------------------------------------

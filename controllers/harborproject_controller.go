@@ -136,6 +136,17 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 		}
 		project.Status.HarborProjectID = hbProject.ProjectID
 		project.Status.HarborProjectName = hbProject.Name
+
+		// If we already have a robot account, skip robot/secret recreation.
+		// The Harbor project metadata (public/autoScan/storageLimit) has already been synced.
+		if project.Status.RobotID > 0 {
+			project.Status.Phase = v1.HarborPhaseReady
+			project.Status.ObservedGeneration = project.Generation
+			logger.Info("HarborProject metadata synced to Harbor",
+				"project", projectName,
+				"id", project.Status.HarborProjectID)
+			return ctrl.Result{}, r.Status().Update(ctx, project)
+		}
 	}
 
 	// Capture the previous robot ID before overwriting it with the new one.
