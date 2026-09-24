@@ -18,7 +18,7 @@ harbor:
   # The initial admin password.  This is used to create the shared
   # Kubernetes secret that the controller also references.
   # Must match harbor.harborAdminPassword in the harbor subchart values.
-  adminPassword: "Harbor12345"
+  adminPassword: ""
 
   # These values are forwarded to the harbor subchart,
   # which in turn forwards them to the official harbor-helm subchart.

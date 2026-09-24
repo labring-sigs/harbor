@@ -151,7 +151,7 @@ helm install harbor-stack . \
   --set harbor.adminPassword=<your-admin-password>
 ```
 
-> **Important:** Change the default admin password (`Harbor12345`) immediately after first deploy.
+> **Important:** The admin password is randomly generated during install. Retrieve it from the `harbor-admin-password` Secret.
 
 #### Scenario 3: Harbor only
 
@@ -200,7 +200,7 @@ Components **enabled**: Core, Registry, JobService, Database, Redis.
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `harbor.enabled` | `false` | Set to `true` to deploy bundled Harbor |
-| `harbor.adminPassword` | `Harbor12345` | Initial admin password (creates the shared Secret) |
+| `harbor.adminPassword` | `""` (auto-generated) | Initial admin password (empty = random; creates the shared Secret) |
 | `harbor-controller.harbor.endpoint` | `http://harbor:80` | Controller endpoint (auto-configured for bundled mode) |
 | `harbor-controller.harbor.registryHost` | `harbor:80` | Registry host (auto-configured for bundled mode) |
 
