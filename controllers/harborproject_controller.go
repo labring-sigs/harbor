@@ -200,7 +200,15 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 				existing.Labels = secret.Labels
 				if updateErr := r.Update(ctx, existing); updateErr != nil {
 					logger.Error(updateErr, "failed to update existing secret in namespace", "namespace", ns)
+					project.Status.Phase = v1.HarborPhaseFailed
+					_ = r.Status().Update(ctx, project)
+					return ctrl.Result{}, fmt.Errorf("failed to update secret in namespace %s: %w", ns, updateErr)
 				}
+			} else {
+				logger.Error(getErr, "failed to get existing secret in namespace", "namespace", ns)
+				project.Status.Phase = v1.HarborPhaseFailed
+				_ = r.Status().Update(ctx, project)
+				return ctrl.Result{}, fmt.Errorf("failed to get existing secret in namespace %s: %w", ns, getErr)
 			}
 		}
 	}
