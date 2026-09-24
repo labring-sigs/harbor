@@ -14,12 +14,12 @@
 harbor:
   # Set to true to deploy a bundled minimal Harbor instance.
   enabled: false
-
-  # The initial admin password.  This is used to create the shared
-  # Kubernetes secret that the controller also references.
-  # Must match harbor.harborAdminPassword in the harbor subchart values.
+  # The initial admin password (optional).  When set (non-empty), this value is
+  # used to create the shared `harbor-admin-password` Secret that both the Harbor
+  # subchart and the controller reference.  When empty (the default), a random
+  # 16-character password is generated on first install and preserved across
+  # upgrades in the same Secret.
   adminPassword: ""
-
   # Disable the subchart's own admin-password-secret template because
   # this umbrella chart creates the Secret itself (see
   # templates/admin-password-secret.yaml) with the same lookup+randAlphaNum
