@@ -5,6 +5,19 @@
 # Number of replicas
 replicas: 1
 
+# Reconciler concurrency settings
+# Maximum number of concurrent reconciles for each controller.
+# Increase these values when managing a large number of projects to speed up
+# reconciliation at the cost of higher API usage.
+harborProjectConcurrency: 10
+projectAutoProvisionConcurrency: 10
+
+# Kubernetes API client tuning
+# Increase these values if the controller makes many API calls concurrently.
+kubeAPI:
+  qps: 5.0
+  burst: 10
+
 # Image configuration
 image:
   repository: ghcr.io/dinoallo/labring-sigs-harbor
