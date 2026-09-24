@@ -44,6 +44,7 @@ spec:
             {{- if .Values.autoProvision.enabled }}
             - --enable-project-auto-provision
             - --owner-label-key={{ .Values.autoProvision.ownerLabelKey }}
+            - --default-storage-limit={{ .Values.autoProvision.defaultStorageLimit }}
             {{- end }}
             {{- range .Values.controllerArgs }}
             {{- if and $.Values.leaderElection.enabled (eq . "--leader-elect") }}{{- else }}

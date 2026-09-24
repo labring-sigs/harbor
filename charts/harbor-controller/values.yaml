@@ -52,6 +52,9 @@ autoProvision:
   # Label key on namespaces used to determine the owner for auto-provisioned
   # HarborProject CRs.
   ownerLabelKey: "user.sealos.io/owner"
+  # Default storage limit in bytes for auto-provisioned HarborProjects.
+  # -1 means unlimited. Defaults to 5 GiB (5*1024*1024*1024).
+  defaultStorageLimit: 5368709120
 
 # Controller command-line arguments
 controllerArgs: []
