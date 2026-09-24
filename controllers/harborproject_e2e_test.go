@@ -487,7 +487,7 @@ func TestE2E_HarborProjectLifecycle(t *testing.T) {
 
 	robotUser := entry["username"].(string)
 	robotPass := entry["password"].(string)
-	t.Logf("Robot credentials: user=%s pass=%s", robotUser, robotPass)
+	t.Logf("Robot credentials: user=%s (password hidden)", robotUser)
 
 	// ---- Step 6: Push an OCI image using the robot credentials ----
 	t.Log("=== Step 6: Pushing OCI image ===")
@@ -722,6 +722,9 @@ func TestE2E_MockOCIEndpoints(t *testing.T) {
 	}
 	if _, err := os.Stat("/var/run/docker.sock"); os.IsNotExist(err) {
 		t.Skip("Docker socket not found; skipping e2e test")
+	}
+	if testing.Short() {
+		t.Skip("skipping e2e test in short mode")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)

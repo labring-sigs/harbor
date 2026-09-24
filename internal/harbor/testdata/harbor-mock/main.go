@@ -177,11 +177,18 @@ func handleProjectByID(w http.ResponseWriter, r *http.Request) {
 				// Each test uses its own isolated mock container, so clearing
 				// all OCI data is equivalent to Harbor project cascade
 				// deletion for single-project scenarios.
+				// Lock each OCI mutex to avoid concurrent map access races.
+				globalStore.manMu.Lock()
 				globalStore.manifests = make(map[string]map[string]manifestEntry)
+				globalStore.manMu.Unlock()
+				globalStore.blobMu.Lock()
 				globalStore.blobs = make(map[string][]byte)
+				globalStore.blobMu.Unlock()
+				globalStore.uplMu.Lock()
 				for k := range globalStore.uploads {
 					delete(globalStore.uploads, k)
 				}
+				globalStore.uplMu.Unlock()
 				globalStore.mu.Unlock()
 				w.WriteHeader(http.StatusOK)
 				return
