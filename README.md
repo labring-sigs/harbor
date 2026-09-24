@@ -151,7 +151,7 @@ helm install harbor-stack . \
   --set harbor.adminPassword=<your-admin-password>
 ```
 
-> **Important:** The admin password is randomly generated during install. Retrieve it from the `harbor-admin-password` Secret.
+> **Important:** When `harbor.adminPassword` is omitted or empty, the admin password is randomly generated during install. Retrieve it from the `harbor-admin-password` Secret.
 
 #### Scenario 3: Harbor only
 
