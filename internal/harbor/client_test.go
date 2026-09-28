@@ -165,8 +165,73 @@ func TestGetProjectByName_Found(t *testing.T) {
 	}
 }
 
-func TestGetProjectByName_NotFound(t *testing.T) {
+func TestGetProjectByName_NumericNameFallback(t *testing.T) {
+	requestCount := 0
 	client := newMockClient(func(req *http.Request) (int, string) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			if req.URL.Path != "/api/v2.0/projects/123" {
+				t.Errorf("expected /api/v2.0/projects/123, got %s", req.URL.Path)
+			}
+			return http.StatusOK, `{"project_id":999,"name":"other-project"}`
+		case 2:
+			if req.URL.Path != "/api/v2.0/projects" {
+				t.Errorf("expected /api/v2.0/projects, got %s", req.URL.Path)
+			}
+			if req.URL.Query().Get("name") != "123" {
+				t.Errorf("expected name query 123, got %s", req.URL.RawQuery)
+			}
+			if req.URL.Query().Get("page_size") != "100" {
+				t.Errorf("expected page_size 100, got %s", req.URL.Query().Get("page_size"))
+			}
+			return http.StatusOK, `[{"project_id":5,"name":"123"}]`
+		default:
+			t.Fatalf("unexpected request %d to %s", requestCount, req.URL.String())
+			return http.StatusInternalServerError, ""
+		}
+	})
+
+	proj, err := client.GetProjectByName(context.Background(), "123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if proj == nil {
+		t.Fatal("expected non-nil project")
+	}
+	if proj.ProjectID != 5 || proj.Name != "123" {
+		t.Fatalf("unexpected project: %+v", proj)
+	}
+}
+
+func TestGetProjectByName_NumericNameRequiresExactMatch(t *testing.T) {
+	requestCount := 0
+	client := newMockClient(func(req *http.Request) (int, string) {
+		requestCount++
+		switch requestCount {
+		case 1:
+			return http.StatusNotFound, ""
+		case 2:
+			return http.StatusOK, `[{"project_id":6,"name":"project-123"}]`
+		default:
+			t.Fatalf("unexpected request %d to %s", requestCount, req.URL.String())
+			return http.StatusInternalServerError, ""
+		}
+	})
+
+	proj, err := client.GetProjectByName(context.Background(), "123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if proj != nil {
+		t.Fatalf("expected no fuzzy match, got %+v", proj)
+	}
+}
+
+func TestGetProjectByName_NotFound(t *testing.T) {
+	requestCount := 0
+	client := newMockClient(func(req *http.Request) (int, string) {
+		requestCount++
 		if req.Method != http.MethodGet {
 			t.Errorf("expected GET, got %s", req.Method)
 		}
@@ -179,6 +244,9 @@ func TestGetProjectByName_NotFound(t *testing.T) {
 	}
 	if proj != nil {
 		t.Fatal("expected nil project for empty result")
+	}
+	if requestCount != 1 {
+		t.Errorf("expected one exact lookup, got %d requests", requestCount)
 	}
 }
 
