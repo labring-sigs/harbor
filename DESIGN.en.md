@@ -691,11 +691,11 @@ func (c *Client) GetProjectByName(ctx context.Context, name string) (*Project, e
         return project, nil
     }
     // Harbor treats all-numeric path values as project IDs. Numeric project
-    // names fall back to the name query and require an exact response match.
+    // names fall back to q=name=<value> and require an exact response match.
     if !isNumericProjectName(name) {
         return nil, nil
     }
-    return c.findProjectByQuery(ctx, name)
+    return c.findProjectByExactQuery(ctx, name)
 }
 
 func (c *Client) DeleteProject(ctx context.Context, projectID int64) error {

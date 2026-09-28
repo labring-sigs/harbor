@@ -179,11 +179,11 @@ func TestGetProjectByName_NumericNameFallback(t *testing.T) {
 			if req.URL.Path != "/api/v2.0/projects" {
 				t.Errorf("expected /api/v2.0/projects, got %s", req.URL.Path)
 			}
-			if req.URL.Query().Get("name") != "123" {
-				t.Errorf("expected name query 123, got %s", req.URL.RawQuery)
+			if req.URL.Query().Get("q") != "name=123" {
+				t.Errorf("expected exact q filter name=123, got %s", req.URL.RawQuery)
 			}
-			if req.URL.Query().Get("page_size") != "100" {
-				t.Errorf("expected page_size 100, got %s", req.URL.Query().Get("page_size"))
+			if req.URL.Query().Get("name") != "" {
+				t.Errorf("did not expect fuzzy name query, got %s", req.URL.RawQuery)
 			}
 			return http.StatusOK, `[{"project_id":5,"name":"123"}]`
 		default:
@@ -212,6 +212,9 @@ func TestGetProjectByName_NumericNameRequiresExactMatch(t *testing.T) {
 		case 1:
 			return http.StatusNotFound, ""
 		case 2:
+			if req.URL.Query().Get("q") != "name=123" {
+				t.Errorf("expected exact q filter name=123, got %s", req.URL.RawQuery)
+			}
 			return http.StatusOK, `[{"project_id":6,"name":"project-123"}]`
 		default:
 			t.Fatalf("unexpected request %d to %s", requestCount, req.URL.String())

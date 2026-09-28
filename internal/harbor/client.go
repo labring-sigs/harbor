@@ -80,11 +80,11 @@ func (c *Client) GetProjectByName(ctx context.Context, name string) (*Project, e
 	}
 
 	// Harbor treats all-numeric path values as project IDs. Fall back to the
-	// name query for numeric project names and require an exact response match.
+	// exact q filter for numeric project names and require an exact response match.
 	if !isNumericProjectName(name) {
 		return nil, nil
 	}
-	return c.findProjectByQuery(ctx, name)
+	return c.findProjectByExactQuery(ctx, name)
 }
 
 func (c *Client) getProjectByPath(ctx context.Context, path string) (*Project, error) {
@@ -109,8 +109,11 @@ func (c *Client) getProjectByPath(ctx context.Context, path string) (*Project, e
 	return &project, nil
 }
 
-func (c *Client) findProjectByQuery(ctx context.Context, name string) (*Project, error) {
-	resp, err := c.get(ctx, fmt.Sprintf("/api/v2.0/projects?name=%s&page_size=100", url.QueryEscape(name)))
+func (c *Client) findProjectByExactQuery(ctx context.Context, name string) (*Project, error) {
+	params := url.Values{}
+	params.Set("q", "name="+name)
+
+	resp, err := c.get(ctx, "/api/v2.0/projects?"+params.Encode())
 	if err != nil {
 		return nil, err
 	}
