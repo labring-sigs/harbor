@@ -364,6 +364,7 @@ metadata:
 |  |  - CreateProject                             |   |
 |  |  - DeleteProject                             |   |
 |  |  - CreateRobot                               |   |
+|  |  - ProjectExists                             |   |
 |  |  - GetProjectByName                          |   |
 |  +----------------------------------------------+   |
 |                                                      |
@@ -683,19 +684,25 @@ func (c *Client) CreateProject(ctx context.Context, spec ProjectSpec) (int64, er
 }
 
 func (c *Client) GetProjectByName(ctx context.Context, name string) (*Project, error) {
-    resp, err := c.get(ctx, fmt.Sprintf("/api/v2.0/projects?name=%s", url.QueryEscape(name)))
+    path := fmt.Sprintf("/api/v2.0/projects/%s", url.PathEscape(name))
+    resp, err := c.head(ctx, path)
     if err != nil {
         return nil, err
     }
     defer resp.Body.Close()
-    var projects []Project
-    if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
-        return nil, err
-    }
-    if len(projects) == 0 {
+    if resp.StatusCode == http.StatusNotFound {
         return nil, nil
     }
-    return &projects[0], nil
+    resp, err = c.get(ctx, path)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
+    var project Project
+    if err := json.NewDecoder(resp.Body).Decode(&project); err != nil {
+        return nil, err
+    }
+    return &project, nil
 }
 
 func (c *Client) DeleteProject(ctx context.Context, projectID int64) error {

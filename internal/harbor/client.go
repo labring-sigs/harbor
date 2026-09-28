@@ -69,27 +69,50 @@ func (c *Client) CreateProject(ctx context.Context, spec ProjectSpec) (int64, er
 	return id, nil
 }
 
-// GetProjectByName retrieves a project by its name. Returns nil if not found.
+// ProjectExists checks whether a project exists by its exact name.
+func (c *Client) ProjectExists(ctx context.Context, name string) (bool, error) {
+	resp, err := c.head(ctx, fmt.Sprintf("/api/v2.0/projects/%s", url.PathEscape(name)))
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return false, &ErrAPIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+	}
+	return true, nil
+}
+
+// GetProjectByName retrieves a project by its exact name. Returns nil if not found.
 func (c *Client) GetProjectByName(ctx context.Context, name string) (*Project, error) {
-	resp, err := c.get(ctx, fmt.Sprintf("/api/v2.0/projects?name=%s", url.QueryEscape(name)))
+	exists, err := c.ProjectExists(ctx, name)
+	if err != nil || !exists {
+		return nil, err
+	}
+
+	resp, err := c.get(ctx, fmt.Sprintf("/api/v2.0/projects/%s", url.PathEscape(name)))
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, &ErrAPIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
 	}
 
-	var projects []Project
-	if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
-		return nil, fmt.Errorf("harbor: failed to decode projects list: %w", err)
+	var project Project
+	if err := json.NewDecoder(resp.Body).Decode(&project); err != nil {
+		return nil, fmt.Errorf("harbor: failed to decode project: %w", err)
 	}
-	if len(projects) == 0 {
-		return nil, nil
-	}
-	return &projects[0], nil
+	return &project, nil
 }
 
 // DeleteProject deletes a Harbor project by ID
@@ -252,6 +275,10 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 
 func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
 	return c.doRequest(ctx, http.MethodGet, path, nil)
+}
+
+func (c *Client) head(ctx context.Context, path string) (*http.Response, error) {
+	return c.doRequest(ctx, http.MethodHead, path, nil)
 }
 
 func (c *Client) post(ctx context.Context, path string, body interface{}) (*http.Response, error) {

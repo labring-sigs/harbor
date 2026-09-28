@@ -36,24 +36,24 @@ type manifestEntry struct {
 }
 
 type store struct {
-	mu        sync.Mutex
-	projects  map[string]*project
-	robots    map[int64][]*robotAccount
-	nextPID   int64
-	nextRID   int64
-	now       func() time.Time
+	mu       sync.Mutex
+	projects map[string]*project
+	robots   map[int64][]*robotAccount
+	nextPID  int64
+	nextRID  int64
+	now      func() time.Time
 
 	// OCI blob storage
-	blobMu    sync.RWMutex
-	blobs     map[string][]byte // digest -> content
+	blobMu sync.RWMutex
+	blobs  map[string][]byte // digest -> content
 
 	// OCI manifest storage
 	manMu     sync.RWMutex
 	manifests map[string]map[string]manifestEntry // repo -> ref (tag/digest) -> manifest
 
 	// Upload sessions
-	uplMu     sync.Mutex
-	uploads   map[string][]byte // uploadUUID -> accumulated bytes
+	uplMu   sync.Mutex
+	uploads map[string][]byte // uploadUUID -> accumulated bytes
 }
 
 func newStore() *store {
@@ -127,6 +127,7 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 		all := make([]*project, 0, len(globalStore.projects))
 		for _, p := range globalStore.projects {
 			all = append(all, p)
+		}
 		globalStore.mu.Unlock()
 		writeJSON(w, http.StatusOK, all)
 
@@ -160,14 +161,43 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func handleProjectByID(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := parseID(r.URL.Path)
-	if !ok || projectID == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid project ID"})
+func handleProject(w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimPrefix(r.URL.Path, "/api/v2.0/projects/")
+	if key == "" || strings.Contains(key, "/") {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
 		return
 	}
 
+	globalStore.mu.Lock()
+	projectID, err := strconv.ParseInt(key, 10, 64)
+	var target *project
+	if err == nil {
+		for _, p := range globalStore.projects {
+			if p.ID == projectID {
+				target = p
+				break
+			}
+		}
+	} else {
+		target = globalStore.projects[key]
+	}
+	if target == nil {
+		globalStore.mu.Unlock()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+	projectID = target.ID
+	projectName := target.Name
+	projectResponse := *target
+	globalStore.mu.Unlock()
+
 	switch r.Method {
+	case http.MethodHead:
+		w.WriteHeader(http.StatusOK)
+
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, projectResponse)
+
 	case http.MethodPut:
 		// PUT /api/v2.0/projects/{id} — update project metadata
 		var req struct {
@@ -180,46 +210,37 @@ func handleProjectByID(w http.ResponseWriter, r *http.Request) {
 		}
 
 		globalStore.mu.Lock()
-		defer globalStore.mu.Unlock()
-
-		for _, p := range globalStore.projects {
-			if p.ID == projectID {
-				// In the mock we don't store metadata beyond the project name/ID,
-				// but we acknowledge the update as successful.
-				w.WriteHeader(http.StatusOK)
-				return
-			}
+		_, exists := globalStore.projects[projectName]
+		globalStore.mu.Unlock()
+		if !exists {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+			return
 		}
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		// In the mock we don't store metadata beyond the project name/ID,
+		// but we acknowledge the update as successful.
+		w.WriteHeader(http.StatusOK)
 
 	case http.MethodDelete:
 		globalStore.mu.Lock()
-		for name, p := range globalStore.projects {
-			if p.ID == projectID {
-				delete(globalStore.projects, name)
-				delete(globalStore.robots, projectID)
-				// Each test uses its own isolated mock container, so clearing
-				// all OCI data is equivalent to Harbor project cascade
-				// deletion for single-project scenarios.
-				// Lock each OCI mutex to avoid concurrent map access races.
-				globalStore.manMu.Lock()
-				globalStore.manifests = make(map[string]map[string]manifestEntry)
-				globalStore.manMu.Unlock()
-				globalStore.blobMu.Lock()
-				globalStore.blobs = make(map[string][]byte)
-				globalStore.blobMu.Unlock()
-				globalStore.uplMu.Lock()
-				for k := range globalStore.uploads {
-					delete(globalStore.uploads, k)
-				}
-				globalStore.uplMu.Unlock()
-				globalStore.mu.Unlock()
-				w.WriteHeader(http.StatusOK)
-				return
-			}
+		delete(globalStore.projects, projectName)
+		delete(globalStore.robots, projectID)
+		// Each test uses its own isolated mock container, so clearing
+		// all OCI data is equivalent to Harbor project cascade
+		// deletion for single-project scenarios.
+		// Lock each OCI mutex to avoid concurrent map access races.
+		globalStore.manMu.Lock()
+		globalStore.manifests = make(map[string]map[string]manifestEntry)
+		globalStore.manMu.Unlock()
+		globalStore.blobMu.Lock()
+		globalStore.blobs = make(map[string][]byte)
+		globalStore.blobMu.Unlock()
+		globalStore.uplMu.Lock()
+		for k := range globalStore.uploads {
+			delete(globalStore.uploads, k)
 		}
+		globalStore.uplMu.Unlock()
 		globalStore.mu.Unlock()
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		w.WriteHeader(http.StatusOK)
 
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -596,7 +617,7 @@ func mux(w http.ResponseWriter, r *http.Request) {
 		handleProjects(w, r)
 
 	case strings.Count(path, "/") == 4 && strings.HasPrefix(path, "/api/v2.0/projects/") && !strings.Contains(path, "/robots"):
-		handleProjectByID(w, r)
+		handleProject(w, r)
 
 	case path == "/api/v2.0/robots":
 		handleRobots(w, r)
@@ -617,7 +638,6 @@ func mux(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
 }
-
 
 // isValidRobotCredential checks if the given username/password matches any
 // robot account stored in the global store.
