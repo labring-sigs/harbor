@@ -31,9 +31,11 @@ import (
 )
 
 const (
-	harborFinalizer   = "harbor.sealos.io/cleanup"
-	refreshAnnotation = "harbor.sealos.io/refresh-token"
-	projectLabel      = "harbor.sealos.io/project"
+	harborFinalizer       = "harbor.sealos.io/cleanup"
+	refreshAnnotation     = "harbor.sealos.io/refresh-token"
+	projectLabel          = "harbor.sealos.io/project"
+	storageQuotaCondition = "StorageQuotaReady"
+	quotaNotFoundReason   = "QuotaNotFound"
 )
 
 // HarborProjectReconciler reconciles a HarborProject object
@@ -88,8 +90,22 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// If Ready and ObservedGeneration matches Generation, spec has not changed
-	if project.Status.Phase == v1.HarborPhaseReady && project.Status.ObservedGeneration == project.Generation {
+	// A missing project quota is an explicit, non-retryable state until the
+	// resource changes. This prevents an immediate retry loop when Harbor has
+	// project quotas disabled or otherwise has no quota for the project.
+	if project.Status.Phase == v1.HarborPhaseFailed &&
+		project.Status.ObservedGeneration == project.Generation &&
+		hasCondition(project.Status.Conditions, storageQuotaCondition, quotaNotFoundReason) {
+		return ctrl.Result{}, nil
+	}
+
+	// If Ready, the generation and storage quota have both been observed, spec
+	// has not changed. A nil ObservedStorageLimit forces a one-time quota
+	// backfill for resources created before quota verification existed.
+	if project.Status.Phase == v1.HarborPhaseReady &&
+		project.Status.ObservedGeneration == project.Generation &&
+		project.Status.ObservedStorageLimit != nil &&
+		*project.Status.ObservedStorageLimit == project.Spec.StorageLimit {
 		return ctrl.Result{}, nil
 	}
 
@@ -118,6 +134,7 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 		return ctrl.Result{}, fmt.Errorf("failed to get harbor project: %w", err)
 	}
 
+	previousProjectID := project.Status.HarborProjectID
 	if hbProject == nil {
 		projectID, err := r.HarborClient.CreateProject(ctx, harbor.ProjectSpec{
 			Name:         projectName,
@@ -132,7 +149,13 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 		}
 		project.Status.HarborProjectID = projectID
 		project.Status.HarborProjectName = projectName
+		project.Status.HarborQuotaID = 0
+		project.Status.ObservedStorageLimit = nil
 	} else {
+		if previousProjectID != hbProject.ProjectID {
+			project.Status.HarborQuotaID = 0
+			project.Status.ObservedStorageLimit = nil
+		}
 		// Update existing project properties to match spec
 		if err := r.HarborClient.UpdateProject(ctx, hbProject.ProjectID, harbor.ProjectSpec{
 			Name:         projectName,
@@ -144,34 +167,53 @@ func (r *HarborProjectReconciler) reconcileCreate(ctx context.Context, project *
 			_ = r.Status().Update(ctx, project)
 			return ctrl.Result{}, fmt.Errorf("failed to update harbor project: %w", err)
 		}
-		// Update the project storage quota separately. In Harbor v2.x,
-		// PUT /api/v2.0/projects/{id} does NOT update the quota; it must
-		// be updated via PUT /api/v2.0/quotas/{id}. The quota ID equals
-		// the project ID.
-		if err := r.HarborClient.UpdateProjectQuota(ctx, hbProject.ProjectID, project.Spec.StorageLimit); err != nil {
-			project.Status.Phase = v1.HarborPhaseFailed
-			_ = r.Status().Update(ctx, project)
-			return ctrl.Result{}, fmt.Errorf("failed to update harbor project quota: %w", err)
-		}
-		// Capture the previous Harbor project ID before overwriting it,
-		// so we can detect if Harbor deleted and recreated the project.
-		prevHarborProjectID := project.Status.HarborProjectID
 		project.Status.HarborProjectID = hbProject.ProjectID
 		project.Status.HarborProjectName = hbProject.Name
+	}
 
-		// If the project was previously ready, has a robot account, the
-		// full-flow fields haven't changed, and the Harbor project identity
-		// is unchanged, skip robot/secret recreation. This handles the common
-		// case where a user changes public/autoScan/storageLimit on an existing
-		// project.
-		if wasReady && project.Status.RobotID > 0 && project.Status.LastSpecHash == computeSpecHash(projectName, project.Spec.NamespaceRefs, project.Spec.RobotPermissions) && prevHarborProjectID == hbProject.ProjectID {
-			project.Status.Phase = v1.HarborPhaseReady
+	// Resolve the quota by project reference, update it by quota ID, and read
+	// it back before marking the desired storage limit as observed.
+	quotaID, observedStorageLimit, err := r.syncProjectQuota(
+		ctx,
+		project.Status.HarborProjectID,
+		project.Status.HarborQuotaID,
+		project.Spec.StorageLimit,
+	)
+	if err != nil {
+		project.Status.Phase = v1.HarborPhaseFailed
+		project.Status.ObservedStorageLimit = nil
+		setCondition(&project.Status.Conditions, storageQuotaCondition, metav1.ConditionFalse, "QuotaSyncFailed", err.Error())
+
+		var quotaNotFound *harbor.ErrQuotaNotFound
+		if stderrors.As(err, &quotaNotFound) {
+			project.Status.HarborQuotaID = 0
+			setCondition(&project.Status.Conditions, storageQuotaCondition, metav1.ConditionFalse, quotaNotFoundReason, err.Error())
 			project.Status.ObservedGeneration = project.Generation
-			logger.Info("HarborProject metadata synced to Harbor",
-				"project", projectName,
-				"id", project.Status.HarborProjectID)
-			return ctrl.Result{}, r.Status().Update(ctx, project)
+			if updateErr := r.Status().Update(ctx, project); updateErr != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to update missing quota status: %w", updateErr)
+			}
+			return ctrl.Result{}, nil
 		}
+
+		_ = r.Status().Update(ctx, project)
+		return ctrl.Result{}, fmt.Errorf("failed to sync harbor project quota: %w", err)
+	}
+	project.Status.HarborQuotaID = quotaID
+	project.Status.ObservedStorageLimit = &observedStorageLimit
+	setCondition(&project.Status.Conditions, storageQuotaCondition, metav1.ConditionTrue, "Reconciled", "Harbor project quota is synchronized")
+
+	// If the project was previously ready, has a robot account, the full-flow
+	// fields haven't changed, and the Harbor project identity is unchanged,
+	// skip robot/secret recreation. This handles the common case where a user
+	// changes public/autoScan/storageLimit on an existing project.
+	if hbProject != nil && wasReady && project.Status.RobotID > 0 && project.Status.LastSpecHash == computeSpecHash(projectName, project.Spec.NamespaceRefs, project.Spec.RobotPermissions) && previousProjectID == hbProject.ProjectID {
+		project.Status.Phase = v1.HarborPhaseReady
+		project.Status.ObservedGeneration = project.Generation
+		logger.Info("HarborProject metadata synced to Harbor",
+			"project", projectName,
+			"id", project.Status.HarborProjectID,
+			"quotaID", project.Status.HarborQuotaID)
+		return ctrl.Result{}, r.Status().Update(ctx, project)
 	}
 
 	// Capture the previous robot ID before overwriting it with the new one.
@@ -468,6 +510,116 @@ func toAccess(permissions []v1.RobotPermission) []harbor.RobotAccess {
 	return access
 }
 
+func (r *HarborProjectReconciler) syncProjectQuota(ctx context.Context, projectID, cachedQuotaID, desiredStorageLimit int64) (int64, int64, error) {
+	quota, err := r.resolveProjectQuota(ctx, projectID, cachedQuotaID)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	storageLimit, err := quotaStorageLimit(quota)
+	if err != nil {
+		return 0, 0, err
+	}
+	if storageLimit == desiredStorageLimit {
+		return quota.ID, storageLimit, nil
+	}
+
+	if err := r.HarborClient.UpdateProjectQuota(ctx, quota.ID, desiredStorageLimit); err != nil {
+		// If the cached quota disappeared between GET and PUT, resolve it
+		// once more by project reference before giving up.
+		if cachedQuotaID == 0 || !isAPIStatus(err, http.StatusNotFound) {
+			return 0, 0, err
+		}
+		quota, err = r.resolveProjectQuota(ctx, projectID, 0)
+		if err != nil {
+			return 0, 0, err
+		}
+		storageLimit, err = quotaStorageLimit(quota)
+		if err != nil {
+			return 0, 0, err
+		}
+		if storageLimit != desiredStorageLimit {
+			if err := r.HarborClient.UpdateProjectQuota(ctx, quota.ID, desiredStorageLimit); err != nil {
+				return 0, 0, err
+			}
+		}
+	}
+
+	observedQuota, err := r.HarborClient.GetQuota(ctx, quota.ID)
+	if err != nil {
+		return 0, 0, err
+	}
+	if observedQuota == nil {
+		return 0, 0, &harbor.ErrQuotaNotFound{ProjectID: projectID, QuotaID: quota.ID}
+	}
+	if observedQuota.ID != quota.ID {
+		return 0, 0, fmt.Errorf("harbor: requested quota %d but received quota %d after update", quota.ID, observedQuota.ID)
+	}
+	observedStorageLimit, err := quotaStorageLimit(observedQuota)
+	if err != nil {
+		return 0, 0, err
+	}
+	if observedStorageLimit != desiredStorageLimit {
+		return 0, 0, fmt.Errorf("harbor: quota %d storage limit read-back mismatch: got %d, want %d", observedQuota.ID, observedStorageLimit, desiredStorageLimit)
+	}
+	return observedQuota.ID, observedStorageLimit, nil
+}
+
+func (r *HarborProjectReconciler) resolveProjectQuota(ctx context.Context, projectID, cachedQuotaID int64) (*harbor.Quota, error) {
+	if cachedQuotaID > 0 {
+		quota, err := r.HarborClient.GetQuota(ctx, cachedQuotaID)
+		if err != nil && !isAPIStatus(err, http.StatusNotFound) {
+			return nil, err
+		}
+		if quota != nil {
+			if quota.ID != cachedQuotaID {
+				return nil, fmt.Errorf("harbor: requested quota %d but received quota %d", cachedQuotaID, quota.ID)
+			}
+			if quota.Ref.ID != 0 && quota.Ref.ID != projectID {
+				return nil, fmt.Errorf("harbor: quota %d references project %d, expected %d", quota.ID, quota.Ref.ID, projectID)
+			}
+			return quota, nil
+		}
+	}
+
+	quota, err := r.HarborClient.GetProjectQuota(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if quota == nil {
+		return nil, &harbor.ErrQuotaNotFound{ProjectID: projectID}
+	}
+	if quota.ID <= 0 {
+		return nil, fmt.Errorf("harbor: project %d quota has invalid ID %d", projectID, quota.ID)
+	}
+	return quota, nil
+}
+
+func quotaStorageLimit(quota *harbor.Quota) (int64, error) {
+	if quota == nil {
+		return 0, &harbor.ErrQuotaNotFound{}
+	}
+	storageLimit, ok := quota.Hard["storage"]
+	if !ok {
+		return 0, fmt.Errorf("harbor: quota %d does not define the storage limit", quota.ID)
+	}
+	return storageLimit, nil
+}
+
+func isAPIStatus(err error, statusCode int) bool {
+	var apiErr *harbor.ErrAPIError
+	return stderrors.As(err, &apiErr) && apiErr.StatusCode == statusCode
+}
+
+func hasCondition(conditions []metav1.Condition, conditionType, reason string) bool {
+	for _, condition := range conditions {
+		if condition.Type == conditionType && condition.Status == metav1.ConditionFalse && condition.Reason == reason {
+			return true
+		}
+	}
+	return false
+}
+
 func setCondition(conditions *[]metav1.Condition, condType string, status metav1.ConditionStatus, reason, message string) {
 	if conditions == nil {
 		return
@@ -475,6 +627,9 @@ func setCondition(conditions *[]metav1.Condition, condType string, status metav1
 	found := false
 	for i, c := range *conditions {
 		if c.Type == condType {
+			if c.Status == status && c.Reason == reason && c.Message == message {
+				return
+			}
 			(*conditions)[i].Status = status
 			(*conditions)[i].Reason = reason
 			(*conditions)[i].Message = message

@@ -155,8 +155,16 @@ spec:
               harborProjectName:
                 description: Name of the project in Harbor
                 type: string
+              harborQuotaID:
+                description: Numeric ID of the project quota in Harbor
+                format: int64
+                type: integer
               observedGeneration:
                 description: Last observed generation of the CR
+                format: int64
+                type: integer
+              observedStorageLimit:
+                description: Storage quota value last read back from Harbor
                 format: int64
                 type: integer
               owner:

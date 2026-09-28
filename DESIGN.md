@@ -238,9 +238,15 @@ spec:
               harborProjectName:
                 type: string
                 description: "Harbor 中的 Project 名称"
+              harborQuotaID:
+                type: integer
+                description: "Harbor 中的 Quota ID"
               robotName:
                 type: string
                 description: "Robot Account 名称"
+              observedStorageLimit:
+                type: integer
+                description: "最近从 Harbor 读取到的存储限制"
               conditions:
                 type: array
                 items:
@@ -383,6 +389,7 @@ metadata:
 │  │  - UpdateRobotStatus                          │    │
 │  │  - GetProjectByName                           │    │
 │  │  - GetProjectQuota                            │    │
+│  │  - GetQuota                                   │    │
 │  └──────────────────────────────────────────────┘    │
 │                                                       │
 │  ┌──────────────────────────────────────────────┐    │
@@ -464,13 +471,15 @@ type RobotPermission struct {
 
 // HarborProjectStatus 定义实际状态
 type HarborProjectStatus struct {
-    Phase              HarborProjectPhase `json:"phase,omitempty"`
-    HarborProjectID    int64              `json:"harborProjectID,omitempty"`
-    HarborProjectName  string             `json:"harborProjectName,omitempty"`
-    RobotName          string             `json:"robotName,omitempty"`
-    Owner              string             `json:"owner,omitempty"`
-    ObservedGeneration int64              `json:"observedGeneration,omitempty"`
-    Conditions         []metav1.Condition `json:"conditions,omitempty"`
+    Phase                HarborProjectPhase `json:"phase,omitempty"`
+    HarborProjectID      int64              `json:"harborProjectID,omitempty"`
+    HarborProjectName    string             `json:"harborProjectName,omitempty"`
+    HarborQuotaID        int64              `json:"harborQuotaID,omitempty"`
+    RobotName            string             `json:"robotName,omitempty"`
+    Owner                string             `json:"owner,omitempty"`
+    ObservedGeneration   int64              `json:"observedGeneration,omitempty"`
+    ObservedStorageLimit *int64             `json:"observedStorageLimit,omitempty"`
+    Conditions           []metav1.Condition `json:"conditions,omitempty"`
 }
 
 type HarborProjectPhase string

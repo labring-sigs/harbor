@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -26,7 +27,9 @@ type harborClient interface {
 	GetProjectByName(ctx context.Context, name string) (*harbor.Project, error)
 	CreateProject(ctx context.Context, spec harbor.ProjectSpec) (int64, error)
 	UpdateProject(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error
-	UpdateProjectQuota(ctx context.Context, projectID int64, storageLimit int64) error
+	GetProjectQuota(ctx context.Context, projectID int64) (*harbor.Quota, error)
+	GetQuota(ctx context.Context, quotaID int64) (*harbor.Quota, error)
+	UpdateProjectQuota(ctx context.Context, quotaID int64, storageLimit int64) error
 	CreateRobot(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error)
 	DeleteProjectRobot(ctx context.Context, projectID, robotID int64) error
 	DeleteProject(ctx context.Context, projectID int64) error
@@ -37,13 +40,15 @@ type harborClient interface {
 var _ harborClient = (*harbor.Client)(nil)
 
 type mockHarborClient struct {
-	getProjectByNameFn    func(ctx context.Context, name string) (*harbor.Project, error)
-	createProjectFn       func(ctx context.Context, spec harbor.ProjectSpec) (int64, error)
-	updateProjectFn       func(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error
-	updateProjectQuotaFn  func(ctx context.Context, projectID int64, storageLimit int64) error
-	createRobotFn         func(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error)
-	deleteProjectRobotFn  func(ctx context.Context, projectID, robotID int64) error
-	deleteProjectFn       func(ctx context.Context, projectID int64) error
+	getProjectByNameFn   func(ctx context.Context, name string) (*harbor.Project, error)
+	createProjectFn      func(ctx context.Context, spec harbor.ProjectSpec) (int64, error)
+	updateProjectFn      func(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error
+	getProjectQuotaFn    func(ctx context.Context, projectID int64) (*harbor.Quota, error)
+	getQuotaFn           func(ctx context.Context, quotaID int64) (*harbor.Quota, error)
+	updateProjectQuotaFn func(ctx context.Context, quotaID int64, storageLimit int64) error
+	createRobotFn        func(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error)
+	deleteProjectRobotFn func(ctx context.Context, projectID, robotID int64) error
+	deleteProjectFn      func(ctx context.Context, projectID int64) error
 }
 
 func (m *mockHarborClient) GetProjectByName(ctx context.Context, name string) (*harbor.Project, error) {
@@ -55,8 +60,23 @@ func (m *mockHarborClient) CreateProject(ctx context.Context, spec harbor.Projec
 func (m *mockHarborClient) UpdateProject(ctx context.Context, projectID int64, spec harbor.ProjectSpec) error {
 	return m.updateProjectFn(ctx, projectID, spec)
 }
-func (m *mockHarborClient) UpdateProjectQuota(ctx context.Context, projectID int64, storageLimit int64) error {
-	return m.updateProjectQuotaFn(ctx, projectID, storageLimit)
+func (m *mockHarborClient) GetProjectQuota(ctx context.Context, projectID int64) (*harbor.Quota, error) {
+	if m.getProjectQuotaFn == nil {
+		return testQuota(projectID, -1), nil
+	}
+	return m.getProjectQuotaFn(ctx, projectID)
+}
+func (m *mockHarborClient) GetQuota(ctx context.Context, quotaID int64) (*harbor.Quota, error) {
+	if m.getQuotaFn == nil {
+		return testQuota(quotaID, -1), nil
+	}
+	return m.getQuotaFn(ctx, quotaID)
+}
+func (m *mockHarborClient) UpdateProjectQuota(ctx context.Context, quotaID int64, storageLimit int64) error {
+	if m.updateProjectQuotaFn == nil {
+		return nil
+	}
+	return m.updateProjectQuotaFn(ctx, quotaID, storageLimit)
 }
 func (m *mockHarborClient) CreateRobot(ctx context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
 	return m.createRobotFn(ctx, projectID, spec)
@@ -112,6 +132,13 @@ func fakeProject(name, phase string, withFinalizer bool) *v1.HarborProject {
 		hp.Finalizers = []string{harborFinalizer}
 	}
 	return hp
+}
+
+func testQuota(quotaID, storageLimit int64) *harbor.Quota {
+	return &harbor.Quota{
+		ID:   quotaID,
+		Hard: map[string]int64{"storage": storageLimit},
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -406,6 +433,8 @@ func TestReconcile_RefreshToken_NoOldRobot(t *testing.T) {
 func TestReconcile_AlreadyReady_NoOp(t *testing.T) {
 	project := fakeProject("stable", string(v1.HarborPhaseReady), true)
 	project.Status.HarborProjectID = 100
+	observedStorageLimit := int64(-1)
+	project.Status.ObservedStorageLimit = &observedStorageLimit
 
 	mock := &mockHarborClient{} // no methods should be called
 
@@ -521,7 +550,7 @@ func TestReconcile_UpdateProjectProperties(t *testing.T) {
 	var capturedProjectID int64
 	var capturedSpec harbor.ProjectSpec
 	quotaCalled := false
-	var capturedQuotaProjectID int64
+	var capturedQuotaID int64
 	var capturedStorageLimit int64
 
 	mock := &mockHarborClient{
@@ -532,15 +561,21 @@ func TestReconcile_UpdateProjectProperties(t *testing.T) {
 				Public:    false, // existing project has different value
 			}, nil
 		},
+		getProjectQuotaFn: func(_ context.Context, projectID int64) (*harbor.Quota, error) {
+			return testQuota(900, 1), nil
+		},
+		getQuotaFn: func(_ context.Context, quotaID int64) (*harbor.Quota, error) {
+			return testQuota(quotaID, 100*1024*1024*1024), nil
+		},
 		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
 			updateCalled = true
 			capturedProjectID = projectID
 			capturedSpec = spec
 			return nil
 		},
-		updateProjectQuotaFn: func(_ context.Context, projectID int64, storageLimit int64) error {
+		updateProjectQuotaFn: func(_ context.Context, quotaID int64, storageLimit int64) error {
 			quotaCalled = true
-			capturedQuotaProjectID = projectID
+			capturedQuotaID = quotaID
 			capturedStorageLimit = storageLimit
 			return nil
 		},
@@ -586,8 +621,8 @@ func TestReconcile_UpdateProjectProperties(t *testing.T) {
 	if !quotaCalled {
 		t.Error("expected UpdateProjectQuota to be called when project already exists")
 	}
-	if capturedQuotaProjectID != 42 {
-		t.Errorf("expected quota project ID 42, got %d", capturedQuotaProjectID)
+	if capturedQuotaID != 900 {
+		t.Errorf("expected quota ID 900, got %d", capturedQuotaID)
 	}
 	if capturedStorageLimit != 100*1024*1024*1024 {
 		t.Errorf("expected storage limit 107374182400, got %d", capturedStorageLimit)
@@ -595,8 +630,10 @@ func TestReconcile_UpdateProjectProperties(t *testing.T) {
 
 	// Second reconcile: project already ready with matching generation => should not call UpdateProject
 	updateCalled = false
-	project.Status.ObservedGeneration = project.Generation
-	_ = r.Status().Update(context.Background(), project)
+	updated := &v1.HarborProject{}
+	_ = r.Get(context.Background(), types.NamespacedName{Name: "update-test"}, updated)
+	updated.Status.ObservedGeneration = updated.Generation
+	_ = r.Status().Update(context.Background(), updated)
 
 	result2, err2 := r.Reconcile(context.Background(), req)
 	if err2 != nil {
@@ -610,14 +647,237 @@ func TestReconcile_UpdateProjectProperties(t *testing.T) {
 	}
 }
 
+func TestReconcile_QuotaIDDiffersFromProjectID(t *testing.T) {
+	project := fakeProject("quota-id", string(v1.HarborPhaseReady), true)
+	project.Generation = 2
+	project.Status.HarborProjectID = 42
+	project.Status.HarborProjectName = "hp-quota-id"
+	project.Status.RobotID = 88
+	project.Status.ObservedGeneration = project.Generation
+	project.Status.LastSpecHash = computeSpecHash("hp-quota-id", project.Spec.NamespaceRefs, project.Spec.RobotPermissions)
+	project.Spec.StorageLimit = 10 * 1024 * 1024 * 1024
+
+	quotaUpdates := 0
+	var updatedQuotaID int64
+	createRobotCalled := false
+
+	mock := &mockHarborClient{
+		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
+			return &harbor.Project{ProjectID: 42, Name: "hp-quota-id"}, nil
+		},
+		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			return nil
+		},
+		getProjectQuotaFn: func(_ context.Context, projectID int64) (*harbor.Quota, error) {
+			return testQuota(900, 1), nil
+		},
+		updateProjectQuotaFn: func(_ context.Context, quotaID int64, storageLimit int64) error {
+			quotaUpdates++
+			updatedQuotaID = quotaID
+			if storageLimit != project.Spec.StorageLimit {
+				t.Errorf("expected storage limit %d, got %d", project.Spec.StorageLimit, storageLimit)
+			}
+			return nil
+		},
+		getQuotaFn: func(_ context.Context, quotaID int64) (*harbor.Quota, error) {
+			return testQuota(quotaID, project.Spec.StorageLimit), nil
+		},
+		createRobotFn: func(_ context.Context, projectID int64, spec harbor.RobotSpec) (*harbor.RobotAccount, error) {
+			createRobotCalled = true
+			return &harbor.RobotAccount{ID: 99, Name: "robot-new", Token: "tok"}, nil
+		},
+	}
+
+	r := newTestReconciler(mock, project)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "quota-id"}}
+
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if quotaUpdates != 1 {
+		t.Fatalf("expected one quota update, got %d", quotaUpdates)
+	}
+	if updatedQuotaID != 900 {
+		t.Fatalf("expected quota ID 900, got %d", updatedQuotaID)
+	}
+	if createRobotCalled {
+		t.Fatal("expected robot rotation to be skipped for metadata-only change")
+	}
+
+	updated := &v1.HarborProject{}
+	if err := r.Get(context.Background(), req.NamespacedName, updated); err != nil {
+		t.Fatalf("failed to get updated project: %v", err)
+	}
+	if updated.Status.HarborQuotaID != 900 {
+		t.Errorf("expected HarborQuotaID 900, got %d", updated.Status.HarborQuotaID)
+	}
+	if updated.Status.ObservedStorageLimit == nil || *updated.Status.ObservedStorageLimit != project.Spec.StorageLimit {
+		t.Errorf("expected observed storage limit %d, got %v", project.Spec.StorageLimit, updated.Status.ObservedStorageLimit)
+	}
+
+	// The next reconcile must use the Ready fast path and avoid another quota
+	// lookup/update.
+	quotaUpdates = 0
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("unexpected second reconcile error: %v", err)
+	}
+	if quotaUpdates != 0 {
+		t.Fatalf("expected no quota update on fast path, got %d", quotaUpdates)
+	}
+}
+
+func TestReconcile_UsesCachedQuotaID(t *testing.T) {
+	project := fakeProject("cached-quota", string(v1.HarborPhaseReady), true)
+	project.Generation = 2
+	project.Status.HarborProjectID = 42
+	project.Status.HarborProjectName = "hp-cached-quota"
+	project.Status.HarborQuotaID = 900
+	project.Status.RobotID = 88
+	project.Status.ObservedGeneration = 1
+	project.Status.LastSpecHash = computeSpecHash("hp-cached-quota", project.Spec.NamespaceRefs, project.Spec.RobotPermissions)
+
+	getQuotaCalls := 0
+	getProjectQuotaCalls := 0
+	mock := &mockHarborClient{
+		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
+			return &harbor.Project{ProjectID: 42, Name: "hp-cached-quota"}, nil
+		},
+		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			return nil
+		},
+		getQuotaFn: func(_ context.Context, quotaID int64) (*harbor.Quota, error) {
+			getQuotaCalls++
+			if quotaID != 900 {
+				t.Errorf("expected cached quota ID 900, got %d", quotaID)
+			}
+			return testQuota(quotaID, project.Spec.StorageLimit), nil
+		},
+		getProjectQuotaFn: func(_ context.Context, projectID int64) (*harbor.Quota, error) {
+			getProjectQuotaCalls++
+			return nil, nil
+		},
+	}
+
+	r := newTestReconciler(mock, project)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "cached-quota"}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if getQuotaCalls != 1 {
+		t.Fatalf("expected one GetQuota call, got %d", getQuotaCalls)
+	}
+	if getProjectQuotaCalls != 0 {
+		t.Fatalf("expected cached quota ID to avoid project lookup, got %d lookups", getProjectQuotaCalls)
+	}
+}
+
+func TestReconcile_StaleCachedQuotaIDFallsBack(t *testing.T) {
+	project := fakeProject("stale-quota", string(v1.HarborPhaseReady), true)
+	project.Generation = 2
+	project.Status.HarborProjectID = 42
+	project.Status.HarborProjectName = "hp-stale-quota"
+	project.Status.HarborQuotaID = 900
+	project.Status.RobotID = 88
+	project.Status.ObservedGeneration = 1
+	project.Status.LastSpecHash = computeSpecHash("hp-stale-quota", project.Spec.NamespaceRefs, project.Spec.RobotPermissions)
+
+	getProjectQuotaCalls := 0
+	mock := &mockHarborClient{
+		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
+			return &harbor.Project{ProjectID: 42, Name: "hp-stale-quota"}, nil
+		},
+		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			return nil
+		},
+		getQuotaFn: func(_ context.Context, quotaID int64) (*harbor.Quota, error) {
+			return nil, &harbor.ErrAPIError{StatusCode: http.StatusNotFound, Body: "quota not found"}
+		},
+		getProjectQuotaFn: func(_ context.Context, projectID int64) (*harbor.Quota, error) {
+			getProjectQuotaCalls++
+			return testQuota(901, project.Spec.StorageLimit), nil
+		},
+	}
+
+	r := newTestReconciler(mock, project)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "stale-quota"}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if getProjectQuotaCalls != 1 {
+		t.Fatalf("expected one project quota fallback lookup, got %d", getProjectQuotaCalls)
+	}
+
+	updated := &v1.HarborProject{}
+	if err := r.Get(context.Background(), req.NamespacedName, updated); err != nil {
+		t.Fatalf("failed to get updated project: %v", err)
+	}
+	if updated.Status.HarborQuotaID != 901 {
+		t.Fatalf("expected fallback quota ID 901, got %d", updated.Status.HarborQuotaID)
+	}
+}
+
+func TestReconcile_NoProjectQuotaStopsRetrying(t *testing.T) {
+	project := fakeProject("missing-quota", string(v1.HarborPhaseReady), true)
+	project.Generation = 2
+	project.Status.HarborProjectID = 42
+	project.Status.HarborProjectName = "hp-missing-quota"
+	project.Status.RobotID = 88
+	project.Status.ObservedGeneration = project.Generation
+	project.Status.LastSpecHash = "b2f53f2fa22fd8fa"
+
+	getProjectQuotaCalls := 0
+	mock := &mockHarborClient{
+		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
+			return &harbor.Project{ProjectID: 42, Name: "hp-missing-quota"}, nil
+		},
+		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			return nil
+		},
+		getProjectQuotaFn: func(_ context.Context, projectID int64) (*harbor.Quota, error) {
+			getProjectQuotaCalls++
+			return nil, nil
+		},
+	}
+
+	r := newTestReconciler(mock, project)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "missing-quota"}}
+	result, err := r.Reconcile(context.Background(), req)
+	if err != nil {
+		t.Fatalf("expected missing quota to be handled without a retryable error, got %v", err)
+	}
+	if result.Requeue || result.RequeueAfter != 0 {
+		t.Fatalf("expected no requeue for missing quota, got %+v", result)
+	}
+	if getProjectQuotaCalls != 1 {
+		t.Fatalf("expected one quota lookup, got %d", getProjectQuotaCalls)
+	}
+
+	updated := &v1.HarborProject{}
+	if err := r.Get(context.Background(), req.NamespacedName, updated); err != nil {
+		t.Fatalf("failed to get updated project: %v", err)
+	}
+	if updated.Status.Phase != v1.HarborPhaseFailed {
+		t.Errorf("expected phase Failed, got %q", updated.Status.Phase)
+	}
+	if !hasCondition(updated.Status.Conditions, storageQuotaCondition, quotaNotFoundReason) {
+		t.Fatalf("expected %s condition with reason %s, got %+v", storageQuotaCondition, quotaNotFoundReason, updated.Status.Conditions)
+	}
+
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("unexpected second reconcile error: %v", err)
+	}
+	if getProjectQuotaCalls != 1 {
+		t.Fatalf("expected no retry while quota is still missing, got %d lookups", getProjectQuotaCalls)
+	}
+}
 
 func TestReconcile_UpdatePublicAutoScan_NoRobotRotation(t *testing.T) {
 	project := fakeProject("meta-sync", string(v1.HarborPhaseReady), true)
 	project.Generation = 2
 	project.Status.HarborProjectID = 77
 	project.Status.HarborProjectName = "hp-meta-sync"
-	project.Status.RobotID = 88       // already has a robot
-	project.Status.ObservedGeneration = 0 // stale, force reconcile
+	project.Status.RobotID = 88                      // already has a robot
+	project.Status.ObservedGeneration = 0            // stale, force reconcile
 	project.Status.LastSpecHash = "b2f53f2fa22fd8fa" // matches default namespaceRefs+robotPermissions from fakeProject
 	project.Spec.Public = true
 	project.Spec.AutoScan = true
@@ -684,9 +944,6 @@ func TestReconcile_UpdatePublicAutoScan_NoRobotRotation(t *testing.T) {
 	}
 }
 
-
-
-
 func TestReconcile_UpdatePublicAutoScan_NotReadyStillRotates(t *testing.T) {
 	// If project is not Ready (e.g. recovering from a failed secret distribution),
 	// the controller should still perform full reconciliation (including robot creation)
@@ -695,8 +952,8 @@ func TestReconcile_UpdatePublicAutoScan_NotReadyStillRotates(t *testing.T) {
 	project.Generation = 2
 	project.Status.HarborProjectID = 77
 	project.Status.HarborProjectName = "hp-meta-sync-recover"
-	project.Status.RobotID = 88       // has a robot from a previous attempt
-	project.Status.ObservedGeneration = 0 // stale, force reconcile
+	project.Status.RobotID = 88                      // has a robot from a previous attempt
+	project.Status.ObservedGeneration = 0            // stale, force reconcile
 	project.Status.LastSpecHash = "03737f7570ba8bdb" // hash matches, but wasReady is false so still goes through full flow
 	project.Spec.Public = true
 	project.Spec.AutoScan = true
@@ -794,13 +1051,12 @@ func TestReconcile_UpdatePublicAutoScan_HashMismatchStillRotates(t *testing.T) {
 	}
 }
 
-
 func TestReconcile_FastPath_ProjectIDChanged(t *testing.T) {
 	// If Harbor deleted and recreated the project (different ProjectID with same name),
 	// the fast path must NOT be taken even if everything else matches.
 	project := fakeProject("project-id-change", string(v1.HarborPhaseReady), true)
 	project.Generation = 2
-	project.Status.HarborProjectID = 77  // old ID
+	project.Status.HarborProjectID = 77 // old ID
 	project.Status.HarborProjectName = "hp-project-id-change"
 	project.Status.RobotID = 88
 	project.Status.ObservedGeneration = 0
@@ -858,7 +1114,7 @@ func TestReconcile_ExistingSecretsUpdated(t *testing.T) {
 	project.Generation = 2
 	project.Status.HarborProjectID = 42
 	project.Status.HarborProjectName = "hp-existing-secret"
-	project.Status.RobotID = 0  // no previous robot → full flow
+	project.Status.RobotID = 0 // no previous robot → full flow
 	project.Status.ObservedGeneration = 0
 	project.Spec.Public = true
 
@@ -928,6 +1184,7 @@ func TestReconcile_ExistingSecretsUpdated(t *testing.T) {
 		t.Error("expected secret data to be updated with new token")
 	}
 }
+
 // ---------------------------------------------------------------------------
 // Helper tests
 // ---------------------------------------------------------------------------

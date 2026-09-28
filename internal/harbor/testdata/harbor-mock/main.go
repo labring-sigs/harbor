@@ -30,6 +30,12 @@ type robotAccount struct {
 	Secret string `json:"secret,omitempty"`
 }
 
+type quota struct {
+	ID   int64            `json:"id"`
+	Ref  map[string]any   `json:"ref"`
+	Hard map[string]int64 `json:"hard"`
+}
+
 type manifestEntry struct {
 	content   []byte
 	mediaType string
@@ -39,8 +45,10 @@ type store struct {
 	mu       sync.Mutex
 	projects map[string]*project
 	robots   map[int64][]*robotAccount
+	quotas   map[int64]*quota
 	nextPID  int64
 	nextRID  int64
+	nextQID  int64
 	now      func() time.Time
 
 	// OCI blob storage
@@ -60,8 +68,10 @@ func newStore() *store {
 	return &store{
 		projects:  make(map[string]*project),
 		robots:    make(map[int64][]*robotAccount),
+		quotas:    make(map[int64]*quota),
 		nextPID:   1,
 		nextRID:   1,
+		nextQID:   1000,
 		now:       time.Now,
 		blobs:     make(map[string][]byte),
 		manifests: make(map[string]map[string]manifestEntry),
@@ -133,7 +143,8 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var req struct {
-			Name string `json:"project_name"`
+			Name         string `json:"project_name"`
+			StorageLimit int64  `json:"storage_limit"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -151,6 +162,15 @@ func handleProjects(w http.ResponseWriter, r *http.Request) {
 		globalStore.nextPID++
 		p := &project{ID: id, Name: req.Name}
 		globalStore.projects[req.Name] = p
+		globalStore.nextQID++
+		globalStore.quotas[id] = &quota{
+			ID: globalStore.nextQID,
+			Ref: map[string]any{
+				"id":   id,
+				"name": req.Name,
+			},
+			Hard: map[string]int64{"storage": req.StorageLimit},
+		}
 		globalStore.mu.Unlock()
 
 		w.Header().Set("Location", fmt.Sprintf("/api/v2.0/projects/%d", id))
@@ -221,6 +241,7 @@ func handleProject(w http.ResponseWriter, r *http.Request) {
 		globalStore.mu.Lock()
 		delete(globalStore.projects, projectName)
 		delete(globalStore.robots, projectID)
+		delete(globalStore.quotas, projectID)
 		// Each test uses its own isolated mock container, so clearing
 		// all OCI data is equivalent to Harbor project cascade
 		// deletion for single-project scenarios.
@@ -239,6 +260,72 @@ func handleProject(w http.ResponseWriter, r *http.Request) {
 		globalStore.mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+func handleQuotas(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	if r.URL.Query().Get("reference") != "project" {
+		writeJSON(w, http.StatusOK, []*quota{})
+		return
+	}
+	projectID, err := strconv.ParseInt(r.URL.Query().Get("reference_id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid reference_id"})
+		return
+	}
+
+	globalStore.mu.Lock()
+	q := globalStore.quotas[projectID]
+	globalStore.mu.Unlock()
+	if q == nil {
+		writeJSON(w, http.StatusOK, []*quota{})
+		return
+	}
+	writeJSON(w, http.StatusOK, []*quota{q})
+}
+
+func handleQuotaByID(w http.ResponseWriter, r *http.Request) {
+	quotaID, ok := parseID(r.URL.Path)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid quota ID"})
+		return
+	}
+
+	globalStore.mu.Lock()
+	var target *quota
+	for _, q := range globalStore.quotas {
+		if q.ID == quotaID {
+			target = q
+			break
+		}
+	}
+	globalStore.mu.Unlock()
+	if target == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "quota not found"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, target)
+	case http.MethodPut:
+		var req struct {
+			Hard map[string]int64 `json:"hard"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+			return
+		}
+		globalStore.mu.Lock()
+		target.Hard = req.Hard
+		globalStore.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}
@@ -622,14 +709,11 @@ func mux(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/api/v2.0/robots/"):
 		handleRobotByID(w, r)
 
+	case path == "/api/v2.0/quotas":
+		handleQuotas(w, r)
+
 	case strings.HasPrefix(path, "/api/v2.0/quotas/"):
-		// PUT /api/v2.0/quotas/{id} — update project quota
-		if r.Method != http.MethodPut {
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-			return
-		}
-		// In the mock we don't persist quota, just acknowledge the update.
-		w.WriteHeader(http.StatusOK)
+		handleQuotaByID(w, r)
 
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
