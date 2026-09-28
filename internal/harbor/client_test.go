@@ -137,26 +137,17 @@ func TestCreateProject_MissingLocationHeader(t *testing.T) {
 }
 
 func TestGetProjectByName_Found(t *testing.T) {
-	headCalled := false
-	getCalled := false
 	client := newMockClient(func(req *http.Request) (int, string) {
+		if req.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", req.Method)
+		}
 		if req.URL.Path != "/api/v2.0/projects/my-project" {
 			t.Errorf("expected /api/v2.0/projects/my-project, got %s", req.URL.Path)
 		}
 		if req.URL.Query().Get("name") != "" {
 			t.Errorf("did not expect name query, got %s", req.URL.RawQuery)
 		}
-		switch req.Method {
-		case http.MethodHead:
-			headCalled = true
-			return http.StatusOK, ""
-		case http.MethodGet:
-			getCalled = true
-			return http.StatusOK, `{"project_id":5,"name":"my-project","public":false}`
-		default:
-			t.Errorf("unexpected method %s", req.Method)
-			return http.StatusMethodNotAllowed, ""
-		}
+		return http.StatusOK, `{"project_id":5,"name":"my-project","public":false}`
 	})
 
 	proj, err := client.GetProjectByName(context.Background(), "my-project")
@@ -172,20 +163,12 @@ func TestGetProjectByName_Found(t *testing.T) {
 	if proj.Name != "my-project" {
 		t.Errorf("expected name 'my-project', got %q", proj.Name)
 	}
-	if !headCalled {
-		t.Error("expected HEAD existence check")
-	}
-	if !getCalled {
-		t.Error("expected GET project details")
-	}
 }
 
 func TestGetProjectByName_NotFound(t *testing.T) {
-	getCalled := false
 	client := newMockClient(func(req *http.Request) (int, string) {
-		if req.Method != http.MethodHead {
-			getCalled = true
-			t.Errorf("expected only HEAD, got %s", req.Method)
+		if req.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", req.Method)
 		}
 		return http.StatusNotFound, ""
 	})
@@ -197,9 +180,6 @@ func TestGetProjectByName_NotFound(t *testing.T) {
 	if proj != nil {
 		t.Fatal("expected nil project for empty result")
 	}
-	if getCalled {
-		t.Error("did not expect GET when HEAD reports not found")
-	}
 }
 
 func TestGetProjectByName_APIError(t *testing.T) {
@@ -210,69 +190,6 @@ func TestGetProjectByName_APIError(t *testing.T) {
 	_, err := client.GetProjectByName(context.Background(), "any")
 	if err == nil {
 		t.Fatal("expected error")
-	}
-}
-
-func TestGetProjectByName_DetailAPIError(t *testing.T) {
-	client := newMockClient(func(req *http.Request) (int, string) {
-		switch req.Method {
-		case http.MethodHead:
-			return http.StatusOK, ""
-		case http.MethodGet:
-			return http.StatusInternalServerError, `{"errors":[{"message":"server error"}]}`
-		default:
-			t.Errorf("unexpected method %s", req.Method)
-			return http.StatusMethodNotAllowed, ""
-		}
-	})
-
-	_, err := client.GetProjectByName(context.Background(), "any")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	apiErr, ok := err.(*ErrAPIError)
-	if !ok {
-		t.Fatalf("expected ErrAPIError, got %T", err)
-	}
-	if apiErr.StatusCode != http.StatusInternalServerError {
-		t.Errorf("expected status 500, got %d", apiErr.StatusCode)
-	}
-}
-
-func TestProjectExists_Found(t *testing.T) {
-	client := newMockClient(func(req *http.Request) (int, string) {
-		if req.Method != http.MethodHead {
-			t.Errorf("expected HEAD, got %s", req.Method)
-		}
-		if req.URL.Path != "/api/v2.0/projects/my-project" {
-			t.Errorf("expected /api/v2.0/projects/my-project, got %s", req.URL.Path)
-		}
-		return http.StatusOK, ""
-	})
-
-	exists, err := client.ProjectExists(context.Background(), "my-project")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !exists {
-		t.Fatal("expected project to exist")
-	}
-}
-
-func TestProjectExists_NotFound(t *testing.T) {
-	client := newMockClient(func(req *http.Request) (int, string) {
-		if req.Method != http.MethodHead {
-			t.Errorf("expected HEAD, got %s", req.Method)
-		}
-		return http.StatusNotFound, ""
-	})
-
-	exists, err := client.ProjectExists(context.Background(), "nonexistent")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if exists {
-		t.Fatal("expected project not to exist")
 	}
 }
 

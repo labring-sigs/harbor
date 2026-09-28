@@ -192,9 +192,6 @@ func handleProject(w http.ResponseWriter, r *http.Request) {
 	globalStore.mu.Unlock()
 
 	switch r.Method {
-	case http.MethodHead:
-		w.WriteHeader(http.StatusOK)
-
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, projectResponse)
 

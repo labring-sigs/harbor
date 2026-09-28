@@ -381,7 +381,6 @@ metadata:
 │  │  - DeleteProject                              │    │
 │  │  - CreateRobot                                │    │
 │  │  - UpdateRobotStatus                          │    │
-│  │  - ProjectExists                             │    │
 │  │  - GetProjectByName                           │    │
 │  │  - GetProjectQuota                            │    │
 │  └──────────────────────────────────────────────┘    │
@@ -694,8 +693,7 @@ func (c *Client) CreateProject(ctx context.Context, spec ProjectSpec) (int64, er
 }
 
 func (c *Client) GetProjectByName(ctx context.Context, name string) (*Project, error) {
-    path := fmt.Sprintf("/api/v2.0/projects/%s", url.PathEscape(name))
-    resp, err := c.head(ctx, path)
+    resp, err := c.get(ctx, fmt.Sprintf("/api/v2.0/projects/%s", url.PathEscape(name)))
     if err != nil {
         return nil, err
     }
@@ -703,11 +701,6 @@ func (c *Client) GetProjectByName(ctx context.Context, name string) (*Project, e
     if resp.StatusCode == http.StatusNotFound {
         return nil, nil
     }
-    resp, err = c.get(ctx, path)
-    if err != nil {
-        return nil, err
-    }
-    defer resp.Body.Close()
     var project Project
     if err := json.NewDecoder(resp.Body).Decode(&project); err != nil {
         return nil, err

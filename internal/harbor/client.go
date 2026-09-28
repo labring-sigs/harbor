@@ -69,31 +69,8 @@ func (c *Client) CreateProject(ctx context.Context, spec ProjectSpec) (int64, er
 	return id, nil
 }
 
-// ProjectExists checks whether a project exists by its exact name.
-func (c *Client) ProjectExists(ctx context.Context, name string) (bool, error) {
-	resp, err := c.head(ctx, fmt.Sprintf("/api/v2.0/projects/%s", url.PathEscape(name)))
-	if err != nil {
-		return false, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return false, nil
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return false, &ErrAPIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
-	}
-	return true, nil
-}
-
 // GetProjectByName retrieves a project by its exact name. Returns nil if not found.
 func (c *Client) GetProjectByName(ctx context.Context, name string) (*Project, error) {
-	exists, err := c.ProjectExists(ctx, name)
-	if err != nil || !exists {
-		return nil, err
-	}
-
 	resp, err := c.get(ctx, fmt.Sprintf("/api/v2.0/projects/%s", url.PathEscape(name)))
 	if err != nil {
 		return nil, err
@@ -275,10 +252,6 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 
 func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
 	return c.doRequest(ctx, http.MethodGet, path, nil)
-}
-
-func (c *Client) head(ctx context.Context, path string) (*http.Response, error) {
-	return c.doRequest(ctx, http.MethodHead, path, nil)
 }
 
 func (c *Client) post(ctx context.Context, path string, body interface{}) (*http.Response, error) {
