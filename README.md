@@ -197,6 +197,47 @@ Key defaults specific to this wrapper:
 Components **disabled** by default: Portal, Trivy, Notary, ChartMuseum, Exporter.
 Components **enabled**: Core, Registry, JobService, Database, Redis.
 
+Resource settings are passed through to the official `harbor-helm` chart using
+its upstream component hierarchy. For the standalone `harbor` chart, for
+example:
+
+```yaml
+harbor:
+  core:
+    resources:
+      limits:
+        cpu: "1"
+        memory: 1Gi
+  registry:
+    registry:
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+  database:
+    internal:
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+```
+
+When using `harbor-stack`, add one additional `harbor` level because the
+stack's bundled Harbor is a subchart:
+
+```yaml
+harbor:
+  harbor:
+    core:
+      resources:
+        limits:
+          cpu: "1"
+          memory: 1Gi
+```
+
+Other values supported by `harbor-helm` can be configured under the same
+`harbor:` key and are forwarded unchanged.
+
 ##### Harbor stack (`charts/harbor-stack/values.yaml`)
 
 | Parameter | Default | Description |

@@ -64,6 +64,19 @@ harbor:
           nginx.ingress.kubernetes.io/proxy-body-size: "0"
 
     externalURL: http://core.harbor.domain
+
+    # These maps intentionally default to empty so harbor-helm's defaults are
+    # preserved while allowing resource values to be supplied through the
+    # harbor-stack chart.
+    core:
+      resources: {}
+    jobservice:
+      resources: {}
+    registry:
+      registry:
+        resources: {}
+      controller:
+        resources: {}
     portal:
       enabled: false
     trivy:
@@ -99,6 +112,8 @@ harbor:
       #       rootdirectory: /registry
     database:
       type: internal
+      internal:
+        resources: {}
       external:
         # Reference an existing Kubernetes Secret for the database password.
         # The secret key defaults to POSTGRES_PASSWORD.
@@ -106,10 +121,49 @@ harbor:
         existingSecretKey: "POSTGRES_PASSWORD"
     redis:
       type: internal
+      internal:
+        resources: {}
       external:
         # Reference an existing Kubernetes Secret for the redis password.
         existingSecret: ""
         existingSecretKey: "REDIS_PASSWORD"
+
+    # All values below this nested `harbor:` key are passed through to the
+    # official harbor-helm subchart. Keep the upstream component hierarchy
+    # when configuring resources.
+    #
+    # Example resource configuration:
+    # core:
+    #   resources:
+    #     requests:
+    #       cpu: 500m
+    #       memory: 512Mi
+    #     limits:
+    #       cpu: "1"
+    #       memory: 1Gi
+    # jobservice:
+    #   resources:
+    #     limits:
+    #       cpu: 500m
+    #       memory: 512Mi
+    # registry:
+    #   registry:
+    #     resources:
+    #       limits:
+    #         cpu: 500m
+    #         memory: 512Mi
+    # database:
+    #   internal:
+    #     resources:
+    #       limits:
+    #         cpu: 500m
+    #         memory: 512Mi
+    # redis:
+    #   internal:
+    #     resources:
+    #       limits:
+    #         cpu: 250m
+    #         memory: 256Mi
 
 # ── Harbor Controller ──────────────────────────────────────────────────────
 harbor-controller:

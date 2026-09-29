@@ -61,6 +61,22 @@ harbor:
   # The external URL for token generation
   externalURL: http://core.harbor.domain
 
+  # ---- Enabled component overrides ---------------------------------------
+  # These maps intentionally default to empty so harbor-helm's defaults are
+  # preserved while allowing resource values to be supplied through this
+  # wrapper chart.
+  core:
+    resources: {}
+
+  jobservice:
+    resources: {}
+
+  registry:
+    registry:
+      resources: {}
+    controller:
+      resources: {}
+
   # ---- Components to disable ----
   portal:
     enabled: false
@@ -171,7 +187,8 @@ harbor:
       image:
         repository: docker.io/goharbor/harbor-db
         tag: v2.15.2
-    external:
+      resources: {}
+    external: {}
       # Reference an existing Kubernetes Secret for the database password.
       # The secret must contain the key specified in `existingSecretKey`.
       # When set, the plaintext `password` field is ignored.
@@ -185,33 +202,53 @@ harbor:
       image:
         repository: docker.io/goharbor/valkey-photon
         tag: v2.15.2
-    external:
+      resources: {}
+    external: {}
       # Reference an existing Kubernetes Secret for the redis password.
       # The secret must contain the key specified in `existingSecretKey`.
       # When set, the plaintext `password` field is ignored.
       # existingSecret: ""
       # existingSecretKey: "REDIS_PASSWORD"
 
-  # ---- Resource sizing (adjust as needed for your cluster) ----
-  # resources:
-  #   core:
+  # ---- harbor-helm passthrough -------------------------------------------
+  # Values under this `harbor:` key are merged into the official harbor-helm
+  # subchart. Keep the upstream component hierarchy when configuring values.
+  # In particular, resources are component-specific rather than a single
+  # `resources.<component>` map.
+  #
+  # Example resource configuration:
+  #
+  # core:
+  #   resources:
   #     requests:
   #       cpu: 500m
   #       memory: 512Mi
   #     limits:
-  #       cpu: 1
+  #       cpu: "1"
   #       memory: 1Gi
+  # jobservice:
+  #   resources:
+  #     requests:
+  #       cpu: 300m
+  #       memory: 256Mi
+  #     limits:
+  #       cpu: 500m
+  #       memory: 512Mi
+  # registry:
   #   registry:
-  #     requests:
-  #       cpu: 300m
-  #       memory: 256Mi
-  #     limits:
-  #       cpu: 500m
-  #       memory: 512Mi
-  #   jobservice:
-  #     requests:
-  #       cpu: 300m
-  #       memory: 256Mi
-  #     limits:
-  #       cpu: 500m
-  #       memory: 512Mi
+  #     resources:
+  #       limits:
+  #         cpu: 500m
+  #         memory: 512Mi
+  # database:
+  #   internal:
+  #     resources:
+  #       limits:
+  #         cpu: 500m
+  #         memory: 512Mi
+  # redis:
+  #   internal:
+  #     resources:
+  #       limits:
+  #         cpu: 250m
+  #         memory: 256Mi
