@@ -186,16 +186,72 @@ func (c *Client) UpdateProject(ctx context.Context, projectID int64, spec Projec
 	return nil
 }
 
-// UpdateProjectQuota updates the storage quota for a Harbor project.
-// In Harbor v2.x, the project quota must be updated via a separate endpoint
-// from the project properties. The quota ID equals the project ID.
-func (c *Client) UpdateProjectQuota(ctx context.Context, projectID int64, storageLimit int64) error {
+// GetProjectQuota resolves the quota for a Harbor project. Returns nil if no
+// quota exists for the project.
+func (c *Client) GetProjectQuota(ctx context.Context, projectID int64) (*Quota, error) {
+	params := url.Values{}
+	params.Set("reference", "project")
+	params.Set("reference_id", strconv.FormatInt(projectID, 10))
+
+	resp, err := c.get(ctx, "/api/v2.0/quotas?"+params.Encode())
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, &ErrAPIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+	}
+
+	var quotas []Quota
+	if err := json.NewDecoder(resp.Body).Decode(&quotas); err != nil {
+		return nil, fmt.Errorf("harbor: failed to decode project quotas: %w", err)
+	}
+	if len(quotas) == 0 {
+		return nil, nil
+	}
+	if len(quotas) > 1 {
+		return nil, fmt.Errorf("harbor: multiple quotas found for project %d", projectID)
+	}
+	if quotas[0].Ref.ID != 0 && quotas[0].Ref.ID != projectID {
+		return nil, fmt.Errorf("harbor: quota %d references project %d, expected %d", quotas[0].ID, quotas[0].Ref.ID, projectID)
+	}
+	return &quotas[0], nil
+}
+
+// GetQuota retrieves a Harbor quota by its quota ID. Returns nil if not found.
+func (c *Client) GetQuota(ctx context.Context, quotaID int64) (*Quota, error) {
+	resp, err := c.get(ctx, fmt.Sprintf("/api/v2.0/quotas/%d", quotaID))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, &ErrAPIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
+	}
+
+	var quota Quota
+	if err := json.NewDecoder(resp.Body).Decode(&quota); err != nil {
+		return nil, fmt.Errorf("harbor: failed to decode quota: %w", err)
+	}
+	return &quota, nil
+}
+
+// UpdateProjectQuota updates the storage quota by quota ID. In Harbor v2.x,
+// quota IDs are independent from project IDs.
+func (c *Client) UpdateProjectQuota(ctx context.Context, quotaID int64, storageLimit int64) error {
 	body := map[string]interface{}{
 		"hard": map[string]interface{}{
 			"storage": storageLimit,
 		},
 	}
-	resp, err := c.put(ctx, fmt.Sprintf("/api/v2.0/quotas/%d", projectID), body)
+	resp, err := c.put(ctx, fmt.Sprintf("/api/v2.0/quotas/%d", quotaID), body)
 	if err != nil {
 		return err
 	}

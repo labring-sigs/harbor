@@ -429,6 +429,97 @@ func TestUpdateProjectQuota_Error(t *testing.T) {
 	}
 }
 
+func TestGetProjectQuota_Success(t *testing.T) {
+	client := newMockClient(func(req *http.Request) (int, string) {
+		if req.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", req.Method)
+		}
+		if req.URL.Path != "/api/v2.0/quotas" {
+			t.Errorf("expected /api/v2.0/quotas, got %s", req.URL.Path)
+		}
+		if req.URL.Query().Get("reference") != "project" {
+			t.Errorf("expected reference=project, got %q", req.URL.Query().Get("reference"))
+		}
+		if req.URL.Query().Get("reference_id") != "42" {
+			t.Errorf("expected reference_id=42, got %q", req.URL.Query().Get("reference_id"))
+		}
+		return http.StatusOK, `[{"id":900,"ref":{"id":42,"name":"my-project"},"hard":{"storage":1024}}]`
+	})
+
+	quota, err := client.GetProjectQuota(context.Background(), 42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if quota == nil {
+		t.Fatal("expected non-nil quota")
+	}
+	if quota.ID != 900 || quota.Ref.ID != 42 {
+		t.Fatalf("unexpected quota: %+v", quota)
+	}
+	if quota.Hard["storage"] != 1024 {
+		t.Fatalf("expected storage 1024, got %d", quota.Hard["storage"])
+	}
+}
+
+func TestGetProjectQuota_NoQuota(t *testing.T) {
+	client := newMockClient(func(req *http.Request) (int, string) {
+		return http.StatusOK, `[]`
+	})
+
+	quota, err := client.GetProjectQuota(context.Background(), 42)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if quota != nil {
+		t.Fatalf("expected no quota, got %+v", quota)
+	}
+}
+
+func TestGetProjectQuota_RejectsMultipleMatches(t *testing.T) {
+	client := newMockClient(func(req *http.Request) (int, string) {
+		return http.StatusOK, `[{"id":1,"hard":{"storage":1}},{"id":2,"hard":{"storage":2}}]`
+	})
+
+	_, err := client.GetProjectQuota(context.Background(), 42)
+	if err == nil {
+		t.Fatal("expected error for multiple quotas")
+	}
+}
+
+func TestGetQuota_Success(t *testing.T) {
+	client := newMockClient(func(req *http.Request) (int, string) {
+		if req.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", req.Method)
+		}
+		if req.URL.Path != "/api/v2.0/quotas/900" {
+			t.Errorf("expected /api/v2.0/quotas/900, got %s", req.URL.Path)
+		}
+		return http.StatusOK, `{"id":900,"hard":{"storage":2048}}`
+	})
+
+	quota, err := client.GetQuota(context.Background(), 900)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if quota == nil || quota.ID != 900 || quota.Hard["storage"] != 2048 {
+		t.Fatalf("unexpected quota: %+v", quota)
+	}
+}
+
+func TestGetQuota_NotFound(t *testing.T) {
+	client := newMockClient(func(req *http.Request) (int, string) {
+		return http.StatusNotFound, `{"errors":[{"code":"NOT_FOUND","message":"quota not found"}]}`
+	})
+
+	quota, err := client.GetQuota(context.Background(), 900)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if quota != nil {
+		t.Fatalf("expected no quota, got %+v", quota)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Robot Account API tests
 // ---------------------------------------------------------------------------

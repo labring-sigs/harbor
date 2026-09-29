@@ -136,8 +136,10 @@ func findCRDDir(t *testing.T) string {
 // mockIntegrationHarborClient is a simple in-memory Harbor mock for envtest.
 type mockIntegrationHarborClient struct {
 	projects map[string]*harbor.Project
+	quotas   map[int64]*harbor.Quota
 	nextPID  int64
 	nextRID  int64
+	nextQID  int64
 }
 
 func (m *mockIntegrationHarborClient) GetProjectByName(_ context.Context, name string) (*harbor.Project, error) {
@@ -161,6 +163,18 @@ func (m *mockIntegrationHarborClient) CreateProject(_ context.Context, spec harb
 		ProjectID: id,
 		Name:      spec.Name,
 		Public:    spec.Public,
+	}
+	if m.quotas == nil {
+		m.quotas = make(map[int64]*harbor.Quota)
+	}
+	if m.nextQID == 0 {
+		m.nextQID = 1000
+	}
+	m.nextQID++
+	m.quotas[id] = &harbor.Quota{
+		ID:   m.nextQID,
+		Ref:  harbor.QuotaRef{ID: id, Name: spec.Name},
+		Hard: map[string]int64{"storage": spec.StorageLimit},
 	}
 	return id, nil
 }
@@ -186,6 +200,7 @@ func (m *mockIntegrationHarborClient) DeleteProject(_ context.Context, projectID
 	for name, p := range m.projects {
 		if p.ProjectID == projectID {
 			delete(m.projects, name)
+			delete(m.quotas, projectID)
 			return nil
 		}
 	}
@@ -205,9 +220,30 @@ func (m *mockIntegrationHarborClient) UpdateProject(_ context.Context, projectID
 	return &harbor.ErrNotFound{Resource: "project", ID: projectID}
 }
 
-func (m *mockIntegrationHarborClient) UpdateProjectQuota(_ context.Context, projectID int64, storageLimit int64) error {
-	// In-memory mock: acknowledge the quota update without persisting
-	return nil
+func (m *mockIntegrationHarborClient) GetProjectQuota(_ context.Context, projectID int64) (*harbor.Quota, error) {
+	if m.quotas == nil {
+		return nil, nil
+	}
+	return m.quotas[projectID], nil
+}
+
+func (m *mockIntegrationHarborClient) GetQuota(_ context.Context, quotaID int64) (*harbor.Quota, error) {
+	for _, quota := range m.quotas {
+		if quota.ID == quotaID {
+			return quota, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockIntegrationHarborClient) UpdateProjectQuota(_ context.Context, quotaID int64, storageLimit int64) error {
+	for _, quota := range m.quotas {
+		if quota.ID == quotaID {
+			quota.Hard["storage"] = storageLimit
+			return nil
+		}
+	}
+	return &harbor.ErrQuotaNotFound{QuotaID: quotaID}
 }
 
 // ---------------------------------------------------------------------------

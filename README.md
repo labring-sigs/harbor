@@ -49,9 +49,11 @@ A Kubernetes controller that manages [Harbor](https://goharbor.io/) project and 
 | `phase` | Current lifecycle phase (`Pending` → `Creating` → `Ready` / `Failed`) |
 | `harborProjectID` | Numeric project ID in Harbor |
 | `harborProjectName` | Project name in Harbor |
+| `harborQuotaID` | Numeric quota ID resolved from the project reference |
 | `robotName` | Robot account name |
 | `robotID` | Robot account numeric ID (for precise deletion) |
 | `owner` | Owner propagated from spec |
+| `observedStorageLimit` | Storage limit last read back from Harbor |
 | `conditions` | Standard Kubernetes conditions |
 
 ## Prerequisites

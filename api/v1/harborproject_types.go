@@ -64,16 +64,22 @@ type HarborProjectStatus struct {
 	Phase              HarborProjectPhase `json:"phase,omitempty"`
 	HarborProjectID    int64              `json:"harborProjectID,omitempty"`
 	HarborProjectName  string             `json:"harborProjectName,omitempty"`
+	HarborQuotaID      int64              `json:"harborQuotaID,omitempty"`
 	RobotName          string             `json:"robotName,omitempty"`
 	RobotID            int64              `json:"robotID,omitempty"`
 	Owner              string             `json:"owner,omitempty"`
 	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
+	// ObservedStorageLimit is the storage quota value read back from Harbor.
+	// A nil value means the quota has not yet been observed, which forces a
+	// one-time backfill for resources created before quota verification existed.
+	// +optional
+	ObservedStorageLimit *int64 `json:"observedStorageLimit,omitempty"`
 	// LastSpecHash is a hash of namespaceRefs and robotPermissions from the last
 	// successful full reconciliation. When the current spec matches this hash,
 	// only metadata changes (public/autoScan/storageLimit) have occurred.
 	// +optional
-	LastSpecHash string              `json:"lastSpecHash,omitempty"`
-	Conditions   []metav1.Condition  `json:"conditions,omitempty"`
+	LastSpecHash string             `json:"lastSpecHash,omitempty"`
+	Conditions   []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true

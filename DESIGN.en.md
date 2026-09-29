@@ -219,9 +219,15 @@ spec:
               harborProjectName:
                 type: string
                 description: "Project name in Harbor"
+              harborQuotaID:
+                type: integer
+                description: "Numeric quota ID in Harbor"
               robotName:
                 type: string
                 description: "Robot account name"
+              observedStorageLimit:
+                type: integer
+                description: "Storage limit last observed in Harbor"
               secretName:
                 type: string
                 description: "K8s Secret name containing dockerconfigjson"
@@ -365,6 +371,8 @@ metadata:
 |  |  - DeleteProject                             |   |
 |  |  - CreateRobot                               |   |
 |  |  - GetProjectByName                          |   |
+|  |  - GetProjectQuota                           |   |
+|  |  - GetQuota                                  |   |
 |  +----------------------------------------------+   |
 |                                                      |
 |  +----------------------------------------------+   |
@@ -454,13 +462,15 @@ type RobotPermission struct {
 
 // HarborProjectStatus defines the observed state of HarborProject
 type HarborProjectStatus struct {
-    Phase              HarborProjectPhase `json:"phase,omitempty"`
-    HarborProjectID    int64              `json:"harborProjectID,omitempty"`
-    HarborProjectName  string             `json:"harborProjectName,omitempty"`
-    RobotName          string             `json:"robotName,omitempty"`
-    Owner              string             `json:"owner,omitempty"`
-    ObservedGeneration int64              `json:"observedGeneration,omitempty"`
-    Conditions         []metav1.Condition `json:"conditions,omitempty"`
+    Phase                HarborProjectPhase `json:"phase,omitempty"`
+    HarborProjectID      int64              `json:"harborProjectID,omitempty"`
+    HarborProjectName    string             `json:"harborProjectName,omitempty"`
+    HarborQuotaID        int64              `json:"harborQuotaID,omitempty"`
+    RobotName            string             `json:"robotName,omitempty"`
+    Owner                string             `json:"owner,omitempty"`
+    ObservedGeneration   int64              `json:"observedGeneration,omitempty"`
+    ObservedStorageLimit *int64             `json:"observedStorageLimit,omitempty"`
+    Conditions           []metav1.Condition `json:"conditions,omitempty"`
 }
 
 type HarborProjectPhase string

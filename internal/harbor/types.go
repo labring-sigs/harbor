@@ -15,11 +15,24 @@ type ProjectSpec struct {
 	AutoScan     bool
 }
 
+// Quota represents a Harbor quota returned by the API.
+type Quota struct {
+	ID   int64            `json:"id"`
+	Ref  QuotaRef         `json:"ref"`
+	Hard map[string]int64 `json:"hard"`
+}
+
+// QuotaRef identifies the object a quota applies to.
+type QuotaRef struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
 // RobotSpec defines the desired state of a robot account
 type RobotSpec struct {
-	Name        string             `json:"name"`
-	Duration    int64              `json:"duration"`
-	Permissions []RobotPermission  `json:"permissions"`
+	Name        string            `json:"name"`
+	Duration    int64             `json:"duration"`
+	Permissions []RobotPermission `json:"permissions"`
 }
 
 // RobotPermission defines a single robot account permission
