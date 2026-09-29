@@ -175,9 +175,19 @@ helm install harbor . --namespace harbor-system --create-namespace
 | `harbor.adminPasswordSecret.name` | `harbor-admin-password` | Secret name for the admin password |
 | `harbor.adminPasswordSecret.key` | `password` | Secret key for the admin password |
 | `harbor.registryHost` | `registry.sealos.io` | Registry hostname in dockerconfigjson Secrets |
+| `replicas` | `1` | Controller replicas. Set to at least `2` for HA |
 | `leaderElection.enabled` | `true` | Enable leader election for HA |
+| `podDisruptionBudget.enabled` | `true` | Create a PDB when `replicas > 1` |
+| `podDisruptionBudget.minAvailable` | `1` | Minimum available controller replicas |
+| `podAntiAffinity.enabled` | `true` | Spread controller replicas across nodes |
+| `podAntiAffinity.required` | `false` | Use required instead of preferred anti-affinity |
 | `controllerArgs` | `[]` | Additional controller arguments (managed by `leaderElection`) |
 | `metrics.serviceMonitor.create` | `false` | Create a Prometheus ServiceMonitor |
+
+For controller HA, run at least two replicas with leader election enabled. The
+default pod anti-affinity is preferred, so scheduling still succeeds on
+single-node clusters. Set `podAntiAffinity.required=true` when a hard spread is
+required and enough nodes are available.
 
 ##### Minimal Harbor (`charts/harbor/values.yaml`)
 

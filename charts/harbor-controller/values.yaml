@@ -112,7 +112,24 @@ nodeSelector: {}
 tolerations: []
 
 # Affinity
+# Additional scheduling constraints. If podAntiAffinity is set here, the
+# generated podAntiAffinity block below is skipped.
 affinity: {}
+
+# Pod anti-affinity for controller replicas. Preferred anti-affinity is used
+# by default so scheduling still succeeds on clusters with fewer nodes.
+podAntiAffinity:
+  enabled: true
+  required: false
+  topologyKey: kubernetes.io/hostname
+  weight: 100
+
+# PodDisruptionBudget configuration. The PDB is only created when more than
+# one controller replica is configured.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+  # maxUnavailable: 1
 
 # Additional pod annotations
 podAnnotations: {}
