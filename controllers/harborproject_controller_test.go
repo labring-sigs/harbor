@@ -816,6 +816,92 @@ func TestReconcile_StaleCachedQuotaIDFallsBack(t *testing.T) {
 	}
 }
 
+func TestReconcile_QuotaReplacedBeforeUpdateFallsBack(t *testing.T) {
+	project := fakeProject("replaced-quota", string(v1.HarborPhaseReady), true)
+	project.Generation = 2
+	project.Status.HarborProjectID = 42
+	project.Status.HarborProjectName = "hp-replaced-quota"
+	project.Status.RobotID = 88
+	project.Status.ObservedGeneration = project.Generation
+	project.Status.LastSpecHash = computeSpecHash("hp-replaced-quota", project.Spec.NamespaceRefs, project.Spec.RobotPermissions)
+	project.Spec.StorageLimit = 10 * 1024 * 1024 * 1024
+
+	getProjectQuotaCalls := 0
+	updateQuotaCalls := 0
+	updatedQuotaIDs := make([]int64, 0, 2)
+	mock := &mockHarborClient{
+		getProjectByNameFn: func(_ context.Context, name string) (*harbor.Project, error) {
+			return &harbor.Project{ProjectID: 42, Name: "hp-replaced-quota"}, nil
+		},
+		updateProjectFn: func(_ context.Context, projectID int64, spec harbor.ProjectSpec) error {
+			return nil
+		},
+		getProjectQuotaFn: func(_ context.Context, projectID int64) (*harbor.Quota, error) {
+			getProjectQuotaCalls++
+			switch getProjectQuotaCalls {
+			case 1:
+				return testQuota(900, 1), nil
+			case 2:
+				return testQuota(901, 1), nil
+			default:
+				t.Fatalf("unexpected project quota lookup %d", getProjectQuotaCalls)
+				return nil, nil
+			}
+		},
+		updateProjectQuotaFn: func(_ context.Context, quotaID int64, storageLimit int64) error {
+			updateQuotaCalls++
+			updatedQuotaIDs = append(updatedQuotaIDs, quotaID)
+			switch updateQuotaCalls {
+			case 1:
+				if quotaID != 900 {
+					t.Fatalf("expected initial quota ID 900, got %d", quotaID)
+				}
+				return &harbor.ErrAPIError{StatusCode: http.StatusNotFound, Body: "quota not found"}
+			case 2:
+				if quotaID != 901 {
+					t.Fatalf("expected replacement quota ID 901, got %d", quotaID)
+				}
+				return nil
+			default:
+				t.Fatalf("unexpected quota update %d", updateQuotaCalls)
+				return nil
+			}
+		},
+		getQuotaFn: func(_ context.Context, quotaID int64) (*harbor.Quota, error) {
+			if quotaID != 901 {
+				t.Fatalf("expected read-back from replacement quota 901, got %d", quotaID)
+			}
+			return testQuota(quotaID, project.Spec.StorageLimit), nil
+		},
+	}
+
+	r := newTestReconciler(mock, project)
+	req := ctrl.Request{NamespacedName: types.NamespacedName{Name: "replaced-quota"}}
+	if _, err := r.Reconcile(context.Background(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if getProjectQuotaCalls != 2 {
+		t.Fatalf("expected two project quota lookups, got %d", getProjectQuotaCalls)
+	}
+	if updateQuotaCalls != 2 {
+		t.Fatalf("expected two quota updates, got %d", updateQuotaCalls)
+	}
+	if len(updatedQuotaIDs) != 2 || updatedQuotaIDs[0] != 900 || updatedQuotaIDs[1] != 901 {
+		t.Fatalf("unexpected quota update IDs: %v", updatedQuotaIDs)
+	}
+
+	updated := &v1.HarborProject{}
+	if err := r.Get(context.Background(), req.NamespacedName, updated); err != nil {
+		t.Fatalf("failed to get updated project: %v", err)
+	}
+	if updated.Status.HarborQuotaID != 901 {
+		t.Fatalf("expected replacement quota ID 901, got %d", updated.Status.HarborQuotaID)
+	}
+	if updated.Status.ObservedStorageLimit == nil || *updated.Status.ObservedStorageLimit != project.Spec.StorageLimit {
+		t.Fatalf("expected observed storage limit %d, got %v", project.Spec.StorageLimit, updated.Status.ObservedStorageLimit)
+	}
+}
+
 func TestReconcile_NoProjectQuotaStopsRetrying(t *testing.T) {
 	project := fakeProject("missing-quota", string(v1.HarborPhaseReady), true)
 	project.Generation = 2

@@ -525,9 +525,9 @@ func (r *HarborProjectReconciler) syncProjectQuota(ctx context.Context, projectI
 	}
 
 	if err := r.HarborClient.UpdateProjectQuota(ctx, quota.ID, desiredStorageLimit); err != nil {
-		// If the cached quota disappeared between GET and PUT, resolve it
-		// once more by project reference before giving up.
-		if cachedQuotaID == 0 || !isAPIStatus(err, http.StatusNotFound) {
+		// The quota can disappear between resolution and PUT even when it was
+		// not cached. Resolve it once more by project reference before giving up.
+		if !isAPIStatus(err, http.StatusNotFound) {
 			return 0, 0, err
 		}
 		quota, err = r.resolveProjectQuota(ctx, projectID, 0)
